@@ -26,23 +26,6 @@ Then add it via Claude Code's plugin system.
 
 This saves the key to `~/.claude/channels/whatsapp/.env`.
 
-### 4. Pair Your Phone
-
-Send any message from WhatsApp to your PipesBot number. You'll receive a
-pairing code. Approve it:
-
-```
-/whatsapp:access pair <code>
-```
-
-### 5. Lock Down
-
-Once all users are paired, switch to allowlist-only:
-
-```
-/whatsapp:access policy allowlist
-```
-
 ## Architecture
 
 Single-file MCP server (`server.ts`) that:
@@ -62,7 +45,6 @@ Single-file MCP server (`server.ts`) that:
 
 | Skill | Description |
 |---|---|
-| `/whatsapp:access` | Manage pairings, allowlists, and DM policy |
 | `/whatsapp:configure` | Set API key and review channel status |
 
 ## Dependencies

@@ -31,8 +31,6 @@ Once the WhatsApp plugin is installed:
 1. Get an API key from [pipes.bot](https://pipes.bot) (starts with `pk_`)
 2. Run `/whatsapp:configure pk_your_api_key_here`
 3. Send a WhatsApp message to your PipesBot number
-4. Approve the pairing: `/whatsapp:access pair <code>`
-5. Lock down access: `/whatsapp:access policy allowlist`
 
 See the [WhatsApp plugin README](./plugins/whatsapp/README.md) for full setup and usage details.
 
@@ -44,9 +42,7 @@ A real-time WhatsApp channel powered by an MCP server that connects to PipesBot 
 
 - **Messaging** — send and receive text, images, audio, video, documents, locations, and contacts
 - **Reactions** — react to messages with emoji
-- **Access control** — pairing flow, phone number allowlists, and DM policies
-- **Smart chunking** — long messages are split at paragraph boundaries
-- **Security** — prompt injection protection, rate limiting, pairing code expiration
+- **Smart chunking** — long messages are automatically split
 
 #### Tools
 
@@ -60,7 +56,6 @@ A real-time WhatsApp channel powered by an MCP server that connects to PipesBot 
 | Skill | Description |
 |-------|-------------|
 | `/whatsapp:configure` | Set up API key and review configuration |
-| `/whatsapp:access` | Manage access control — pairings, allowlists, DM policies |
 
 ## Requirements
 
