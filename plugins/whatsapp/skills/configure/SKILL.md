@@ -28,13 +28,17 @@ Read both state files and give the user a complete picture:
    `PIPESBOT_API_KEY`. Show set/not-set; if set, show first 6 chars masked
    (`pk_ab...`).
 
-2. **Access** — read `~/.claude/channels/whatsapp/access.json` (missing file
+2. **Pool Number** — check `.env` for `PIPESBOT_POOL_NUMBER_ID`. Show:
+   - If set: the pool number ID value (e.g. `pn_abc123`)
+   - If not set: *"not set — receiving all pool numbers"*
+
+3. **Access** — read `~/.claude/channels/whatsapp/access.json` (missing file
    = defaults: `dmPolicy: "pairing"`, empty allowlist). Show:
    - DM policy and what it means in one line
    - Allowed senders: count, and list phone numbers
    - Pending pairings: count, with codes and phone numbers if any
 
-3. **What next** — end with a concrete next step based on state:
+4. **What next** — end with a concrete next step based on state:
    - No API key → *"Run `/whatsapp:configure <key>` with your PipesBot API
      key (starts with pk_)."*
    - Key set, policy is pairing, nobody allowed → *"Send a WhatsApp message
@@ -79,9 +83,25 @@ offer.
    preserve other keys. Write back, no quotes around the value.
 4. Confirm, then show the no-args status so the user sees where they stand.
 
+Note: `PIPESBOT_POOL_NUMBER_ID=pn_...` can also be set in `.env` to scope the
+WebSocket connection to a single pool number (see `pool` argument below).
+
 ### `clear` — remove the API key
 
 Delete the `PIPESBOT_API_KEY=` line (or the file if that's the only line).
+
+### `pool <id>` — scope to a single pool number
+
+1. Treat the argument after `pool` as the pool number ID (trim whitespace).
+   Pool number IDs start with `pn_`.
+2. `mkdir -p ~/.claude/channels/whatsapp`
+3. Read existing `.env` if present; update/add the `PIPESBOT_POOL_NUMBER_ID=`
+   line, preserve other keys. Write back, no quotes around the value.
+4. Confirm, then remind the user to restart the session or `/reload-plugins`.
+
+### `pool clear` — receive all pool numbers
+
+Delete the `PIPESBOT_POOL_NUMBER_ID=` line from `.env`.
 
 ---
 

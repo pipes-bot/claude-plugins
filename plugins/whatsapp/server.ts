@@ -50,6 +50,7 @@ try {
 } catch {}
 
 const API_KEY = process.env.PIPESBOT_API_KEY
+const POOL_NUMBER_ID = process.env.PIPESBOT_POOL_NUMBER_ID || undefined
 const STATIC = process.env.WHATSAPP_ACCESS_MODE === 'static'
 
 if (!API_KEY || !API_KEY.startsWith('pk_')) {
@@ -291,7 +292,9 @@ function computeBackoffDelay(attempt: number): number {
 }
 
 function buildWsUrl(): string {
-  return `wss://api.pipes.bot/ws?apiKey=${encodeURIComponent(API_KEY!)}`
+  let url = `wss://api.pipes.bot/ws?apiKey=${encodeURIComponent(API_KEY!)}`
+  if (POOL_NUMBER_ID) url += `&poolNumberId=${encodeURIComponent(POOL_NUMBER_ID)}`
+  return url
 }
 
 function wsSend(message: object): boolean {
@@ -352,7 +355,7 @@ function connectWs(): void {
 
   socket.on('open', () => {
     reconnectAttempts = 0
-    log('WebSocket connected')
+    log(`WebSocket connected${POOL_NUMBER_ID ? ` (pool: ${POOL_NUMBER_ID})` : ' (all pools)'}`)
     startHeartbeat(socket)
   })
 
