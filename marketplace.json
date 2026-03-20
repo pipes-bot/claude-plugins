@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "pipes-bot-claude-plugins",
+  "description": "Claude Code plugins that bridge messaging platforms to Claude Code via PipesBot",
+  "owner": {
+    "name": "pipes-bot"
+  },
+  "plugins": [
+    {
+      "name": "whatsapp",
+      "description": "WhatsApp channel for Claude Code via PipesBot — receive and reply to WhatsApp messages directly from Claude Code",
+      "version": "0.0.1",
+      "category": "communication",
+      "source": "./plugins/whatsapp",
+      "homepage": "https://pipes.bot",
+      "keywords": ["whatsapp", "messaging", "channel", "pipesbot", "communication"]
+    }
+  ]
+}
