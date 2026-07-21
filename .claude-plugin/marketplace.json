@@ -9,7 +9,7 @@
     {
       "name": "whatsapp",
       "description": "WhatsApp channel for Claude Code via PipesBot — receive and reply to WhatsApp messages directly from Claude Code",
-      "version": "0.0.1",
+      "version": "0.0.4",
       "category": "communication",
       "source": "./plugins/whatsapp",
       "homepage": "https://pipes.bot",

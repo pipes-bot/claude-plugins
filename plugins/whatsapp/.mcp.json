@@ -2,8 +2,7 @@
   "mcpServers": {
     "whatsapp": {
       "command": "bun",
-      "args": ["run", "start"],
-      "cwd": "."
+      "args": ["run", "--cwd", "${CLAUDE_PLUGIN_ROOT}", "--shell=bun", "--silent", "start"]
     }
   }
 }
