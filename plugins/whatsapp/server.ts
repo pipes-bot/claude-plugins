@@ -616,6 +616,20 @@ function handleReplyStatus(msg: PipesBotReplyStatus): void {
     log(`reply delivered to ${data.conversationId} (messageId: ${data.messageId})`)
   } else {
     log(`reply failed for ${data.conversationId}: [${data.code ?? 'UNKNOWN'}] ${data.error ?? 'unknown error'}`)
+    if (data.code === 'DAILY_LIMIT_REACHED') {
+      // Tell the session so the agent stops retrying instead of looping on a blocked send.
+      void mcp.notification({
+        method: 'notifications/claude/channel',
+        params: {
+          content:
+            'Unable to send reply: this sandbox number reached its daily limit (5 messages/day). It resets at 00:00 UTC. Do not retry until then. For more volume, connect your own number with BYON.',
+          meta: {
+            conversation_id: data.conversationId,
+            source: 'pipesbot',
+          },
+        },
+      })
+    }
   }
 }
 
