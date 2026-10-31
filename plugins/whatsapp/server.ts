@@ -274,6 +274,8 @@ const mcp = new Server(
       '',
       'Messages from WhatsApp arrive as <channel source="whatsapp" conversation_id="..." pool_number_id="..." message_id="..." from_number="..." user="..." ts="...">. If the tag has an image_path or file_path attribute, Read that file — it is media the sender attached. Reply with the reply tool — pass conversation_id, pool_number_id, and to_number back.',
       '',
+      'Channel events with kind="delivery_error" are PipesBot delivery notices (for example a daily send limit), not messages from the user. Do not reply to them; adjust what you do next instead.',
+      '',
       'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Use react to add emoji reactions.',
       '',
       'WhatsApp has no message history API — you only see messages as they arrive. If you need earlier context, ask the user to paste or summarize.',
@@ -625,7 +627,7 @@ function handleReplyStatus(msg: PipesBotReplyStatus): void {
             'Unable to send reply: this sandbox number reached its daily limit (5 messages/day). It resets at 00:00 UTC. Do not retry until then. For more volume, connect your own number with BYON.',
           meta: {
             conversation_id: data.conversationId,
-            source: 'pipesbot',
+            kind: 'delivery_error',
           },
         },
       })
