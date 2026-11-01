@@ -29,7 +29,7 @@ claude plugin install ./plugins/whatsapp
 Once the WhatsApp plugin is installed:
 
 1. Get an API key from [pipes.bot](https://pipes.bot). The prefix picks the mode:
-   - `pk_` — PipesBot's shared pool number (text only)
+   - `pk_` — PipesBot's shared pool number: text replies only (inbound media works; outbound files and reactions are BYON-only)
    - `ak_` — your own WhatsApp number as a BYON App on API v2 (text, files, reactions)
 2. Run `/whatsapp:configure pk_your_api_key_here` (or `ak_…`)
 3. On BYON, run `/whatsapp:configure trust <your number>` — only trusted senders reach Claude

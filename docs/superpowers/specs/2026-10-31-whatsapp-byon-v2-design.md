@@ -116,8 +116,9 @@ which is injectable for tests. `server.ts` only sees `InboundMessage` and `Trans
   Message content is never logged. No reply, no reaction, no media download.
 - The "empty list in app-v2" hint is logged once per process, on the first drop.
 - Identity changes: a v2 `system` message of type `user_changed_number` or
-  `user_changed_user_id` whose `system.previous_user_id` is trusted produces a log line
-  suggesting `/whatsapp:configure trust <new user_id>`. The list is never updated
+  `user_changed_user_id` whose `system.previous_user_id` or previous phone (the message's
+  `from`) is trusted produces a log line suggesting `/whatsapp:configure trust <new
+  user_id or wa_id>` (or, when neither is present, to check the next message's sender). The list is never updated
   automatically.
 
 ## Inbound
@@ -207,6 +208,7 @@ fetch or disk write.
 type Target = { poolNumberId: string; to: string; conversationId?: string }
 type SendOutcome = { messageId?: string }
 interface Transport {
+  readonly supportsFiles: boolean       // false on pool numbers
   sendText(t: Target, text: string): Promise<SendOutcome>
   sendFile(t: Target, path: string): Promise<SendOutcome>
   react(t: Target, messageId: string, emoji: string): Promise<SendOutcome>
@@ -216,6 +218,15 @@ interface Transport {
 ```
 
 Failures throw `Error` with a message that is surfaced as the tool error.
+
+- `supportsFiles`: `false` on `PoolTransport`, `true` on `AppV2Transport`. `reply` with
+  `files` on a transport without it fails before anything is sent:
+  `reply failed: file attachments are not supported on pool numbers — nothing was sent`.
+- File types: only types Meta accepts are sent (`whatsappMimeFor` in `media.ts`: PDF,
+  Office, text — txt/md/csv/log/json as `text/plain` — JPEG/PNG, WebP as a sticker,
+  MP4/3GP, aac/amr/m4a/mp3/ogg/opus). Anything else (GIF, ZIP, unknown) fails fast,
+  before any network call, with `unsupported file type for WhatsApp: <ext or "(none)"> —
+  send PDF, Office, text, JPEG/PNG, MP4/3GP or common audio`.
 
 ### PoolTransport (`pk_`)
 
@@ -262,8 +273,10 @@ Failures throw `Error` with a message that is surfaced as the tool error.
 
 - `reply`: unchanged validation (`assertSendable`, 50 MB per file), 4096-char chunks.
   Chunks are sent in order, each awaited; the first failure stops and reports
-  `reply failed after N of M part(s) sent: <error>`. Then files, one `sendFile` each.
-  Result: `sent` or `sent N parts`.
+  `reply failed after N of M part(s) sent: <error>`. Then files, one `sendFile` each; a
+  failed file is reported the same way (`file attachment failed for <path>: <error>`),
+  with M counting text chunks and files. Blank text with files sends only the files;
+  blank text alone is an error. Result: `sent` or `sent N parts`.
 - `react`: one `transport.react` call.
 - Schemas: `conversation_id` becomes optional on both tools; `pool_number_id` and
   `to_number` stay required.
@@ -323,7 +336,7 @@ Moved from `server.ts` with these changes:
     name fallback, system not delivered.
   - `inbound` (pool): current behavior, BSUID mapping.
   - `AppV2Transport`: `to` vs `recipient`, frame shapes, `send_result` correlation,
-    timeout, disconnect rejection, two-step REST file send with mocked `fetch`.
+    timeout, disconnect rejection, single REST file send (`/v1/messages/app/send`, base64) with mocked `fetch`.
   - Pipeline: untrusted sender → no download, no notification; duplicate → one notification.
 - Manual end-to-end on a v2 App with a BYON number: trusted phone sends text, image,
   reaction (all reach Claude); Claude replies with text and a file and reacts; an

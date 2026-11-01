@@ -23,8 +23,9 @@ export function normalizeId(raw: unknown): string | null {
 }
 
 // Read on every call so edits take effect without a restart. Never writes.
-// A missing file is an empty list; an unreadable or malformed one fails closed
-// (empty list) and is logged.
+// A missing file is an empty list; an unreadable or malformed one is also read as
+// an empty list, and logged. That blocks everyone on app-v2 but, on a pool number,
+// lets everyone through (see isTrusted; documented in the README).
 export function readTrustList(path: string, log: (m: string) => void): Set<string> {
   let text: string
   try {

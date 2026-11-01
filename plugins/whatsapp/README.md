@@ -8,7 +8,7 @@ The PipesBot API key picks the mode:
 
 | Key | Mode | What you get |
 |---|---|---|
-| `pk_…` | Pool number — PipesBot's shared number | Text only. File attachments and reactions return an error. Everyone reaches Claude unless you add [trusted senders](#trusted-senders). |
+| `pk_…` | Pool number — PipesBot's shared number | Text replies only (inbound media works; outbound files and reactions are BYON-only). File attachments and reactions return an error. Everyone reaches Claude unless you add [trusted senders](#trusted-senders). |
 | `ak_…` | BYON App on PipesBot API v2 — your own WhatsApp number | Text, files and reactions. Only [trusted senders](#trusted-senders) reach Claude. |
 
 ### 1. Get a PipesBot API Key
@@ -106,7 +106,11 @@ notifications, and exposes `reply` and `react` tools for Claude to respond.
 | `reply` | Send a text reply. Optional file attachments (BYON only, max 50 MB each) |
 | `react` | Add an emoji reaction to a message (BYON only) |
 
-On a pool number, a `reply` with `files` or a `react` call returns an error.
+On a pool number, a `reply` with `files` or a `react` call returns an error, and nothing
+is sent. On BYON, attachments must be a type WhatsApp accepts: PDF, Office (doc/docx,
+xls/xlsx, ppt/pptx), text (txt, md, csv, log, json — sent as plain text), JPEG/PNG,
+WebP (sent as a sticker), MP4/3GP, or common audio (aac, amr, m4a, mp3, ogg/opus).
+Other types (GIF, ZIP, …) are refused before anything is sent.
 
 ## Skills
 
@@ -170,9 +174,10 @@ Run `/whatsapp:configure trust <id>` with exactly that value (see
 
 ### Inbound media arrives as `(media unavailable)`
 
-Inbound media on BYON needs the pipes-bot media-route auth fix (branch
-`fix/media-routes-app-keys`) deployed. Until then those messages arrive with
-`(media unavailable)` instead of an `image_path` / `file_path`.
+Downloading inbound media on BYON needs the pipes-bot fix that lets App keys
+(`ak_`) download their own App's media (pipes-bot PR #72, commit `87eb508`) to be
+deployed. Until then those messages arrive with `(media unavailable)` instead of an
+`image_path` / `file_path`.
 
 ### No messages from while Claude Code was closed
 

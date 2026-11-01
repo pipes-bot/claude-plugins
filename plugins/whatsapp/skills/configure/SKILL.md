@@ -18,7 +18,8 @@ reads `.env` at boot and re-reads `trusted.json` on every inbound message.
 
 The API key prefix picks the mode:
 
-- `pk_` — **pool number** (PipesBot's shared number). Text only: file
+- `pk_` — **pool number** (PipesBot's shared number). Text replies only
+  (inbound media works; outbound files and reactions are BYON-only): file
   attachments and reactions return an explicit error. `trusted.json` is
   optional: empty means everyone the server delivers (your activated phone)
   gets through; once it has entries, only those senders do.
@@ -41,7 +42,8 @@ Read `.env` and `trusted.json` and give the user a complete picture:
    (`pk_ab...` / `ak_ab...`).
 
 2. **Mode** — from the key prefix: `pk_` → *"pool number (shared PipesBot
-   number, text only)"*; `ak_` → *"BYON (your own number, API v2)"*. Omit if
+   number) — text replies only (inbound media works; outbound files and
+   reactions are BYON-only)"*; `ak_` → *"BYON (your own number, API v2)"*. Omit if
    no key.
 
 3. **Pool Number** — check `.env` for `PIPESBOT_POOL_NUMBER_ID`. Show:
@@ -108,9 +110,16 @@ Delete the `PIPESBOT_POOL_NUMBER_ID=` line from `.env`.
      e.g. `+55 (11) 91234-5678` → `5511912345678`.
    - If nothing is left (no digits), tell the user the value is not a phone
      number or BSUID and stop.
+   - If the input contains letters and a dot but is not a BSUID after
+     upper-casing (e.g. `BR.12a34`, `B.123`), it is probably a mistyped
+     BSUID: warn the user, show the digits-only phone number it would be
+     saved as, and ask before saving it. Stop unless they confirm.
 2. `mkdir -p ~/.claude/channels/whatsapp`. If `trusted.json` does not exist,
    create it as `{ "senders": [] }` and `chmod 600` it.
-3. Read `trusted.json`, add the normalized ID to `senders` unless already
+3. Read `trusted.json`. If it is not valid JSON of the form
+   `{ "senders": [...] }`, stop and tell the user what is wrong with it — do
+   not rewrite or overwrite it (the server treats it as an empty list until
+   it is fixed). Otherwise add the normalized ID to `senders` unless already
    there (compare after normalizing existing entries), preserve everything
    else, write back as pretty-printed JSON.
 4. Confirm with the normalized ID that was stored. The change applies
@@ -127,10 +136,13 @@ to pass to `trust`.
 
 ### `untrust <phone|BSUID>` — remove a sender
 
-Normalize the argument exactly as for `trust`, remove every entry of
-`senders` that normalizes to it, write back. If it was not in the list, say
-so. Applies immediately. If the list is now empty, warn on a BYON key that all
-messages will be dropped; on a pool key, that everyone is allowed again.
+Normalize the argument exactly as for `trust` (including the mistyped-BSUID
+warning). Read `trusted.json`; if it exists but is not valid
+`{ "senders": [...] }` JSON, stop and tell the user — do not rewrite it.
+Otherwise remove every entry of `senders` that normalizes to it and write
+back. If it was not in the list, say so. Applies immediately. If the list is
+now empty, warn on a BYON key that all messages will be dropped; on a pool
+key, that everyone is allowed again.
 
 ### `trusted` — list trusted senders
 
