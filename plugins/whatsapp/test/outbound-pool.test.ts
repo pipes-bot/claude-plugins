@@ -57,6 +57,10 @@ test('pool files and reactions fail loudly', async () => {
   expect(sent).toEqual([])
 })
 
+test('pool transport does not support files', () => {
+  expect(new PoolTransport(() => true, () => {}).supportsFiles).toBe(false)
+})
+
 test('pool consumes reply_status', () => {
   const { transport, logs } = setup()
   expect(

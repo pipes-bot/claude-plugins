@@ -3,14 +3,15 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TOOLS, callTool } from '../tools'
-import { POOL_UNSUPPORTED, type SendOutcome, type Target, type Transport } from '../outbound'
+import type { SendOutcome, Target, Transport } from '../outbound'
 
 type Call = { method: 'sendText' | 'sendFile' | 'react'; args: unknown[] }
 
-function fakeTransport(opts: { failTextAt?: number; failFile?: string } = {}) {
+function fakeTransport(opts: { failTextAt?: number; failFile?: string; supportsFiles?: boolean } = {}) {
   const calls: Call[] = []
   let texts = 0
   const transport: Transport = {
+    supportsFiles: opts.supportsFiles ?? true,
     async sendText(t: Target, text: string): Promise<SendOutcome> {
       calls.push({ method: 'sendText', args: [t, text] })
       texts++
@@ -88,7 +89,7 @@ test('chunk failure on a two-part reply', async () => {
   const { transport, calls } = fakeTransport({ failTextAt: 2 })
   const r = await callTool('reply', { ...replyArgs, text: 'a'.repeat(5000), files: ['/tmp/a.png'] }, deps(transport))
   expect(r).toEqual({
-    content: [{ type: 'text', text: 'reply failed after 1 of 2 part(s) sent: boom' }],
+    content: [{ type: 'text', text: 'reply failed after 1 of 3 part(s) sent: boom' }],
     isError: true,
   })
   expect(calls.map(c => c.method)).toEqual(['sendText', 'sendText'])
@@ -102,13 +103,59 @@ test('files after text', async () => {
   expect(r).toEqual({ content: [{ type: 'text', text: 'sent 2 parts' }] })
 })
 
-test('file error is reported', async () => {
-  const { transport } = fakeTransport({ failFile: POOL_UNSUPPORTED })
+test('files on a transport without file support are rejected before sending anything', async () => {
+  const { transport, calls } = fakeTransport({ supportsFiles: false })
   const r = await callTool('reply', { ...replyArgs, files: ['/tmp/a.png'] }, deps(transport))
+  expect(r).toEqual({
+    content: [{ type: 'text', text: 'reply failed: file attachments are not supported on pool numbers — nothing was sent' }],
+    isError: true,
+  })
+  expect(calls).toEqual([])
+})
+
+test('text-only reply works on a transport without file support', async () => {
+  const { transport, calls } = fakeTransport({ supportsFiles: false })
+  const r = await callTool('reply', { ...replyArgs, files: [] }, deps(transport))
+  expect(r).toEqual({ content: [{ type: 'text', text: 'sent' }] })
+  expect(calls.map(c => c.method)).toEqual(['sendText'])
+})
+
+test('file failure after text reports the partial send', async () => {
+  const { transport, calls } = fakeTransport({ failFile: 'HTTP 500' })
+  const r = await callTool('reply', { ...replyArgs, files: ['/tmp/a.png'] }, deps(transport))
+  expect(r).toEqual({
+    content: [{ type: 'text', text: 'reply failed after 1 of 2 part(s) sent: file attachment failed for /tmp/a.png: HTTP 500' }],
+    isError: true,
+  })
+  expect(calls.map(c => c.method)).toEqual(['sendText', 'sendFile'])
+})
+
+test('files are checked before sending: type', async () => {
+  const { transport, calls } = fakeTransport()
+  const r = await callTool('reply', { ...replyArgs, files: ['/tmp/a.png', '/tmp/anim.gif'] }, deps(transport))
   expect(r.isError).toBe(true)
   expect(r.content[0]!.text).toBe(
-    'reply failed: file attachment failed for /tmp/a.png: not supported on pool numbers — the server ignores this frame',
+    'reply failed: unsupported file type for WhatsApp: .gif — send PDF, Office, text, JPEG/PNG, MP4/3GP or common audio',
   )
+  expect(calls).toEqual([])
+})
+
+test('empty text with files sends only the files', async () => {
+  for (const text of ['', '  \n ']) {
+    const { transport, calls } = fakeTransport()
+    const r = await callTool('reply', { ...replyArgs, text, files: ['/tmp/a.png'] }, deps(transport))
+    expect(r).toEqual({ content: [{ type: 'text', text: 'sent' }] })
+    expect(calls.map(c => c.method)).toEqual(['sendFile'])
+  }
+})
+
+test('empty text without files is an error', async () => {
+  for (const text of ['', '   ']) {
+    const { transport, calls } = fakeTransport()
+    const r = await callTool('reply', { ...replyArgs, text }, deps(transport))
+    expect(r).toEqual({ content: [{ type: 'text', text: 'reply failed: text is empty' }], isError: true })
+    expect(calls).toEqual([])
+  }
 })
 
 test('files are checked before sending: size', async () => {

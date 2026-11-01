@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from 'fs'
 import { join, sep } from 'path'
+import { unsupportedFileType, whatsappMimeFor } from './media'
 import type { Target, Transport } from './outbound'
 
 const TEXT_CHUNK_LIMIT = 4096
@@ -105,22 +106,34 @@ async function reply(args: Record<string, unknown>, deps: ToolDeps): Promise<Too
   const statSize = deps.statSize ?? (p => statSync(p).size)
   const t = targetOf(args)
   const files = (args.files as string[] | undefined) ?? []
+  const body = typeof args.text === 'string' ? args.text : ''
 
+  // Everything that can be checked locally is checked before the first part goes out.
+  if (files.length > 0 && !deps.transport.supportsFiles) {
+    return text('reply failed: file attachments are not supported on pool numbers — nothing was sent', true)
+  }
   for (const f of files) {
     assertSendable(f, deps.stateDir)
+    if (whatsappMimeFor(f) === null) throw new Error(unsupportedFileType(f))
     const size = statSize(f)
     if (size > MAX_ATTACHMENT_BYTES) {
       throw new Error(`file too large: ${f} (${(size / 1024 / 1024).toFixed(1)}MB, max 50MB)`)
     }
   }
 
-  const chunks = chunk(args.text as string, TEXT_CHUNK_LIMIT)
+  // Blank text alongside files means "just the files".
+  const chunks = body.trim() === '' ? [] : chunk(body, TEXT_CHUNK_LIMIT)
+  if (chunks.length === 0 && files.length === 0) throw new Error('text is empty')
+
+  const total = chunks.length + files.length
   let sentCount = 0
+  const partial = (msg: string) => text(`reply failed after ${sentCount} of ${total} part(s) sent: ${msg}`, true)
+
   for (const c of chunks) {
     try {
       await deps.transport.sendText(t, c)
     } catch (err) {
-      return text(`reply failed after ${sentCount} of ${chunks.length} part(s) sent: ${errorMessage(err)}`, true)
+      return partial(errorMessage(err))
     }
     sentCount++
   }
@@ -129,7 +142,7 @@ async function reply(args: Record<string, unknown>, deps: ToolDeps): Promise<Too
     try {
       await deps.transport.sendFile(t, f)
     } catch (err) {
-      throw new Error(`file attachment failed for ${f}: ${errorMessage(err)}`)
+      return partial(`file attachment failed for ${f}: ${errorMessage(err)}`)
     }
     sentCount++
   }

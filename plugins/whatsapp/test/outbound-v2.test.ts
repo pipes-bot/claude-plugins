@@ -23,6 +23,10 @@ function setup(opts: { connected?: boolean; timeoutMs?: number; fetch?: any; rea
   return { transport, frames, logs }
 }
 
+test('app-v2 transport supports files', () => {
+  expect(setup().transport.supportsFiles).toBe(true)
+})
+
 test('text frame shape', async () => {
   const { transport, frames } = setup()
   const p = transport.sendText(target, 'hi')
