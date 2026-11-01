@@ -55,11 +55,12 @@ export function readTrustList(path: string, log: (m: string) => void): Set<strin
   return out
 }
 
-// Pool numbers are private, so every sender is trusted there. In app-v2 mode a
-// sender must match the list by phone number or BSUID. Each field is only
-// compared as its own kind, so a BSUID in `phone` or digits in `bsuid` never match.
+// An empty list trusts everyone on a pool number and no one on app-v2. A non-empty
+// list gates both modes: the sender must match it by phone number or BSUID. Each
+// field is only compared as its own kind, so a BSUID in `phone` or digits in `bsuid`
+// never match.
 export function isTrusted(sender: Sender, mode: Mode, list: Set<string>): boolean {
-  if (mode === 'pool') return true
+  if (list.size === 0) return mode === 'pool'
   const phone = normalizeId(sender.phone)
   if (phone !== null && !isBsuid(phone) && list.has(phone)) return true
   const bsuid = normalizeId(sender.bsuid)

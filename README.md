@@ -45,7 +45,7 @@ A real-time WhatsApp channel powered by an MCP server that connects to PipesBot 
 
 - **Messaging** — send and receive text, images, audio, video, documents, locations, and contacts
 - **Two modes** — a shared pool number (`pk_` key) or your own number as a BYON App on API v2 (`ak_` key)
-- **Trusted senders** — on BYON, only senders in `~/.claude/channels/whatsapp/trusted.json` reach Claude
+- **Trusted senders** — only senders in `~/.claude/channels/whatsapp/trusted.json` reach Claude (required on BYON, optional on pool numbers)
 - **Reactions** — react to messages with emoji (BYON only)
 - **Smart chunking** — long messages are automatically split
 
