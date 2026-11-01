@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs'
 import { basename } from 'path'
 import { isBsuid } from './trust'
-import { mimeFromPath } from './media'
+import { unsupportedFileType, whatsappMimeFor } from './media'
 
 export type Target = { poolNumberId: string; to: string; conversationId?: string }
 export type SendOutcome = { messageId?: string }
@@ -102,6 +102,8 @@ export class AppV2Transport implements Transport {
   }
 
   async sendFile(t: Target, path: string): Promise<SendOutcome> {
+    const mimeType = whatsappMimeFor(path)
+    if (mimeType === null) throw new Error(unsupportedFileType(path))
     const bytes = this.readFile(path)
     const res = await this.fetchFn(`${this.deps.apiBase}/v1/messages/app/send`, {
       method: 'POST',
@@ -110,7 +112,7 @@ export class AppV2Transport implements Transport {
         poolNumberId: t.poolNumberId,
         to: t.to,
         media: Buffer.from(bytes).toString('base64'),
-        mimeType: mimeFromPath(path),
+        mimeType,
         fileName: basename(path),
       }),
     })
