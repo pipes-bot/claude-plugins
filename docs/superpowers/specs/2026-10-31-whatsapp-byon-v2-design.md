@@ -23,6 +23,21 @@ gate inbound messages on a list of trusted senders.
   both deliverable. The pipes-bot v2 spec
   (`pipes-bot/docs/superpowers/specs/2026-10-06-whatsapp-bsuid-byon-v2-design.md`) lists
   this plugin's move to v2 as a follow-up.
+- `GET /v1/media/download/:mediaId` (and `POST /v1/media/upload`) in
+  `pipes-bot/apps/server/src/routes/v1/media.ts` authenticate with `validateApiKey`,
+  which only knows `pk_` keys, although the BYON docs say `ak_` keys work and
+  `resolveMediaDownload` already takes an `appId`. Without a fix, every inbound BYON
+  media download returns 401.
+
+## Server change (pipes-bot, separate branch and PR)
+
+- In `apps/server/src/routes/v1/media.ts`, `/upload` and `/download/:mediaId` call
+  `validateAnyApiKey` instead of `validateApiKey`. `/download` passes the returned
+  `appId` to `resolveMediaDownload` (it already reads `auth.appId`).
+- Tests in a new `apps/server/src/routes/v1/media.test.ts`: an `ak_` key reaches
+  `resolveMediaDownload` with its `appId`; a `pk_` key still works; an invalid key is 401.
+- Branch from `origin/main` in a separate worktree; the main checkout has unrelated
+  work in progress.
 
 ## Decisions
 
@@ -174,7 +189,10 @@ frame; keep the connection.
 2. Parse → `InboundMessage[]`.
 3. Dedupe on `dedupeKey` with an in-memory insertion-ordered set capped at 1000 entries.
 4. Trust gate.
-5. Download media (existing `downloadMedia`; works with `ak_` keys).
+5. Download media (existing `downloadMedia`). With an `ak_` key this needs the
+   pipes-bot server change below. If the download fails (any non-2xx, including the
+   401 a not-yet-deployed server returns), the message is still delivered with
+   ` (media unavailable)` appended to its body.
 6. Emit `notifications/claude/channel`. Meta fields:
    `pool_number_id`, `message_id`, `from_number` (= `replyTo`), `user` (= name or
    `replyTo`), `ts`, `conversation_id` (pool only), `sender_id` (BSUID, when present),
@@ -232,13 +250,12 @@ Failures throw `Error` with a message that is surfaced as the tool error.
 - Pending requests live in a `Map<requestId, {resolve, reject, timer}>`. `onDisconnect`
   rejects all pending with `WebSocket disconnected`. A `send_result` with an unknown
   `requestId` is logged and dropped.
-- `sendFile`:
-  1. `POST https://api.pipes.bot/v1/media/upload`, multipart field `file`,
-     `Authorization: Bearer <ak_>` → `{ mediaId }`.
-  2. `POST https://api.pipes.bot/v1/messages/app/send` with
-     `{ poolNumberId, to, media: mediaId }` → `{ messageId, contacts }`.
-
-  Any non-2xx throws with the HTTP status and the response body.
+- `sendFile`: one call, `POST https://api.pipes.bot/v1/messages/app/send` with
+  `Authorization: Bearer <ak_>` and
+  `{ poolNumberId, to, media: <base64>, mimeType, fileName }` → `{ messageId, contacts }`.
+  Pipes.bot stores the file, uploads it to Meta and sends it. (`/v1/media/upload` is not
+  used: it only accepts `pk_` keys.) Any non-2xx throws with the HTTP status and the
+  response body.
 - Not connected: `sendText`/`react` throw `WebSocket not connected` immediately.
 
 ### Tool handlers
@@ -325,4 +342,5 @@ Moved from `server.ts` with these changes:
 - Automatic trust migration on identity changes.
 - Pairing flow.
 - Surfacing delivery statuses to Claude.
-- Server changes (e.g. API version in the `connected` frame).
+- Server changes other than the media route auth fix (e.g. API version in the
+  `connected` frame).
