@@ -2,8 +2,11 @@
 /**
  * WhatsApp channel for Claude Code via PipesBot.
  *
- * Self-contained MCP server. Authentication is handled by the PipesBot API key
- * and pool number ID.
+ * Self-contained MCP server, wiring only. The PipesBot API key picks the mode:
+ *   - pk_ (pool number): every sender reaches Claude; replies go out as
+ *     `whatsapp_reply` frames.
+ *   - ak_ (BYON App on API v2): only senders in ~/.claude/channels/whatsapp/trusted.json
+ *     reach Claude; replies, reactions and files go out as v2 `send` frames / app/send.
  *
  * Connects to wss://api.pipes.bot/ws to receive WhatsApp messages and send replies.
  */
@@ -14,622 +17,94 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import WebSocket from 'ws'
-import { randomBytes } from 'crypto'
 import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  statSync,
-  realpathSync,
-} from 'fs'
-import { homedir } from 'os'
-import { join, sep } from 'path'
-
-// ── A. Constants & env loading ──────────────────────────────────────────────
-
-const STATE_DIR = join(homedir(), '.claude', 'channels', 'whatsapp')
-const ENV_FILE = join(STATE_DIR, '.env')
-const INBOX_DIR = join(STATE_DIR, 'inbox')
-
-const PIPES_BOT_API_BASE = 'https://api.pipes.bot'
-
-// Load ~/.claude/channels/whatsapp/.env into process.env. Real env wins.
-try {
-  for (const line of readFileSync(ENV_FILE, 'utf8').split('\n')) {
-    const m = line.match(/^(\w+)=(.*)$/)
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2]
-  }
-} catch {}
-
-const API_KEY = process.env.PIPESBOT_API_KEY
-const POOL_NUMBER_ID = process.env.PIPESBOT_POOL_NUMBER_ID || undefined
-
-if (!API_KEY || !API_KEY.startsWith('pk_')) {
-  process.stderr.write(
-    `whatsapp channel: PIPESBOT_API_KEY required (must start with pk_)\n` +
-    `  set in ${ENV_FILE}\n` +
-    `  format: PIPESBOT_API_KEY=pk_...\n`,
-  )
-  process.exit(1)
-}
-
-// WebSocket constants
-const BASE_MS = 1_000
-const MAX_MS = 120_000
-const PING_INTERVAL_MS = 25_000
-const PONG_TIMEOUT_MS = 50_000
-
-// ── B. Limits & guards ────────────────────────────────────────────────────────
-
-const TEXT_CHUNK_LIMIT = 4096
-const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
-
-// Prevent sending channel state files (except inbox contents).
-function assertSendable(f: string): void {
-  let real, stateReal: string
-  try {
-    real = realpathSync(f)
-    stateReal = realpathSync(STATE_DIR)
-  } catch { return }
-  const inbox = join(stateReal, 'inbox')
-  if (real.startsWith(stateReal + sep) && !real.startsWith(inbox + sep)) {
-    throw new Error(`refusing to send channel state: ${f}`)
-  }
-}
-
-// ── C. WebSocket connection ─────────────────────────────────────────────────
-
-let ws: WebSocket | null = null
-let shouldReconnect = true
-let reconnectAttempts = 0
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let pingTimer: ReturnType<typeof setInterval> | null = null
-let pongTimer: ReturnType<typeof setTimeout> | null = null
+  API_BASE,
+  ENV_FILE,
+  STATE_DIR,
+  TRUST_FILE,
+  bootWarnings,
+  buildWsUrl,
+  loadEnvFile,
+  parseConfig,
+} from './config'
+import { readTrustList } from './trust'
+import { downloadMedia } from './media'
+import { AppV2Transport, PoolTransport, type Send, type Transport } from './outbound'
+import { createConnection } from './ws'
+import { createFrameRouter, createInboundPipeline } from './pipeline'
+import { INSTRUCTIONS, TOOLS, callTool } from './tools'
 
 function log(msg: string): void {
   process.stderr.write(`whatsapp channel: ${msg}\n`)
 }
 
-function computeBackoffDelay(attempt: number): number {
-  return Math.floor(Math.random() * Math.min(MAX_MS, BASE_MS * Math.pow(2, attempt)))
+// ── Config ──────────────────────────────────────────────────────────────────
+
+loadEnvFile(ENV_FILE, process.env)
+const parsed = parseConfig(process.env)
+if ('error' in parsed) {
+  process.stderr.write(`whatsapp channel: ${parsed.error}\n`)
+  process.exit(1)
 }
+const config = parsed
 
-function buildWsUrl(): string {
-  let url = `wss://api.pipes.bot/ws?apiKey=${encodeURIComponent(API_KEY!)}`
-  if (POOL_NUMBER_ID) url += `&poolNumberId=${encodeURIComponent(POOL_NUMBER_ID)}`
-  return url
-}
+for (const warning of bootWarnings(config, readTrustList(TRUST_FILE, log).size)) log(warning)
 
-function wsSend(message: object): boolean {
-  if (ws === null || ws.readyState !== WebSocket.OPEN) return false
-  ws.send(JSON.stringify(message))
-  return true
-}
+// ── Transport ───────────────────────────────────────────────────────────────
 
-function startHeartbeat(socket: WebSocket): void {
-  pingTimer = setInterval(() => {
-    socket.ping()
+// The transport is built before the connection exists; `conn` is assigned at startup.
+let conn: { send: Send } | null = null
+const send: Send = f => conn?.send(f) ?? false
 
-    if (pongTimer !== null) clearTimeout(pongTimer)
-    pongTimer = setTimeout(() => {
-      log('pong timeout — terminating dead connection')
-      socket.terminate()
-    }, PONG_TIMEOUT_MS)
-  }, PING_INTERVAL_MS)
+const transport: Transport =
+  config.mode === 'pool'
+    ? new PoolTransport(send, log)
+    : new AppV2Transport({ send, log, apiKey: config.apiKey, apiBase: API_BASE })
 
-  socket.on('pong', () => {
-    if (pongTimer !== null) {
-      clearTimeout(pongTimer)
-      pongTimer = null
-    }
-  })
-}
-
-function stopHeartbeat(): void {
-  if (pingTimer !== null) { clearInterval(pingTimer); pingTimer = null }
-  if (pongTimer !== null) { clearTimeout(pongTimer); pongTimer = null }
-}
-
-function scheduleReconnect(): void {
-  reconnectAttempts += 1
-  const delay = computeBackoffDelay(reconnectAttempts)
-  log(`reconnect attempt ${reconnectAttempts} in ${delay}ms`)
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    connectWs()
-  }, delay)
-}
-
-function connectWs(): void {
-  const socket = new WebSocket(buildWsUrl(), {
-    handshakeTimeout: 10_000,
-  })
-  ws = socket
-
-  socket.on('unexpected-response', (_req, response) => {
-    const { statusCode } = response
-    if (statusCode === 401 || statusCode === 403) {
-      shouldReconnect = false
-      log(`WebSocket authentication failed (HTTP ${statusCode}) — stopping`)
-    } else {
-      log(`WebSocket upgrade failed (HTTP ${statusCode}) — will reconnect`)
-    }
-  })
-
-  socket.on('open', () => {
-    reconnectAttempts = 0
-    log(`WebSocket connected${POOL_NUMBER_ID ? ` (pool: ${POOL_NUMBER_ID})` : ' (all pools)'}`)
-    startHeartbeat(socket)
-  })
-
-  socket.on('message', (data) => {
-    try {
-      const parsed = JSON.parse(data.toString()) as object
-      handleWsMessage(parsed)
-    } catch {
-      log('received non-JSON WebSocket message — ignoring')
-    }
-  })
-
-  socket.on('error', (err) => {
-    log(`WebSocket error: ${err.message}`)
-  })
-
-  socket.on('close', () => {
-    stopHeartbeat()
-    ws = null
-    if (shouldReconnect) {
-      scheduleReconnect()
-    } else {
-      log('WebSocket disconnected')
-    }
-  })
-}
-
-// ── D. Text chunking ────────────────────────────────────────────────────────
-
-function chunk(text: string, limit: number, mode: 'length' | 'newline'): string[] {
-  if (text.length <= limit) return [text]
-  const out: string[] = []
-  let rest = text
-  while (rest.length > limit) {
-    let cut = limit
-    if (mode === 'newline') {
-      const para = rest.lastIndexOf('\n\n', limit)
-      const line = rest.lastIndexOf('\n', limit)
-      const space = rest.lastIndexOf(' ', limit)
-      cut = para > limit / 2 ? para : line > limit / 2 ? line : space > 0 ? space : limit
-    }
-    out.push(rest.slice(0, cut))
-    rest = rest.slice(cut).replace(/^\n+/, '')
-  }
-  if (rest) out.push(rest)
-  return out
-}
-
-// ── E. Media download ───────────────────────────────────────────────────────
-
-async function downloadMedia(downloadUrl: string, mimeType: string, fileName?: string): Promise<string | null> {
-  const absoluteUrl = `${PIPES_BOT_API_BASE}${downloadUrl}`
-
-  try {
-    // First request with auth — follow redirects manually so the
-    // Authorization header is NOT forwarded to the R2 pre-signed URL.
-    const initialResponse = await fetch(absoluteUrl, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      redirect: 'manual',
-    })
-
-    const redirectUrl =
-      initialResponse.status >= 300 && initialResponse.status < 400
-        ? initialResponse.headers.get('location')
-        : null
-
-    const mediaResponse = redirectUrl
-      ? await fetch(redirectUrl)
-      : await fetch(absoluteUrl, {
-          headers: { Authorization: `Bearer ${API_KEY}` },
-        })
-
-    if (!mediaResponse.ok) {
-      log(`media download failed: HTTP ${mediaResponse.status}`)
-      return null
-    }
-
-    const buf = Buffer.from(await mediaResponse.arrayBuffer())
-
-    // Determine extension from filename, mimeType, or default
-    let ext = 'bin'
-    if (fileName) {
-      const parts = fileName.split('.')
-      if (parts.length > 1) ext = parts.pop()!
-    } else {
-      const mimeExt: Record<string, string> = {
-        'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
-        'image/webp': 'webp', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3',
-        'video/mp4': 'mp4', 'application/pdf': 'pdf',
-      }
-      ext = mimeExt[mimeType] ?? 'bin'
-    }
-
-    const path = join(INBOX_DIR, `${Date.now()}-${randomBytes(4).toString('hex')}.${ext}`)
-    mkdirSync(INBOX_DIR, { recursive: true })
-    writeFileSync(path, buf)
-    return path
-  } catch (err) {
-    log(`media download failed: ${err}`)
-    return null
-  }
-}
-
-// ── F. MCP server setup ─────────────────────────────────────────────────────
+// ── MCP server ──────────────────────────────────────────────────────────────
 
 const mcp = new Server(
   { name: 'whatsapp', version: '1.0.0' },
   {
     capabilities: { tools: {}, experimental: { 'claude/channel': {} } },
-    instructions: [
-      'The sender reads WhatsApp on their phone, not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches their chat.',
-      '',
-      'Messages from WhatsApp arrive as <channel source="whatsapp" conversation_id="..." pool_number_id="..." message_id="..." from_number="..." user="..." ts="...">. If the tag has an image_path or file_path attribute, Read that file — it is media the sender attached. Reply with the reply tool — pass conversation_id, pool_number_id, and to_number back.',
-      '',
-      'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Use react to add emoji reactions.',
-      '',
-      'WhatsApp has no message history API — you only see messages as they arrive. If you need earlier context, ask the user to paste or summarize.',
-    ].join('\n'),
+    instructions: INSTRUCTIONS,
   },
 )
 
-// ── G. MCP tool handlers ────────────────────────────────────────────────────
+// TOOLS types inputSchema as a plain object; the SDK's result type wants its JSON-schema shape.
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }) as any)
 
-mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: 'reply',
-      description:
-        'Reply on WhatsApp. Pass conversation_id, pool_number_id, and to_number from the inbound message. Optionally pass files (absolute paths) to attach images or documents.',
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          conversation_id: { type: 'string' },
-          pool_number_id: { type: 'string' },
-          to_number: { type: 'string' },
-          text: { type: 'string' },
-          files: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Absolute file paths to attach. Max 50MB each.',
-          },
-        },
-        required: ['conversation_id', 'pool_number_id', 'to_number', 'text'],
-      },
-    },
-    {
-      name: 'react',
-      description: 'Add an emoji reaction to a WhatsApp message.',
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          conversation_id: { type: 'string' },
-          pool_number_id: { type: 'string' },
-          to_number: { type: 'string' },
-          message_id: { type: 'string' },
-          emoji: { type: 'string' },
-        },
-        required: ['conversation_id', 'pool_number_id', 'to_number', 'message_id', 'emoji'],
-      },
-    },
-  ],
-}))
+mcp.setRequestHandler(CallToolRequestSchema, async req =>
+  callTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>, {
+    transport,
+    stateDir: STATE_DIR,
+  }),
+)
 
-mcp.setRequestHandler(CallToolRequestSchema, async req => {
-  const args = (req.params.arguments ?? {}) as Record<string, unknown>
-  try {
-    switch (req.params.name) {
-      case 'reply': {
-        const conversation_id = args.conversation_id as string
-        const pool_number_id = args.pool_number_id as string
-        const to_number = args.to_number as string
-        const text = args.text as string
-        const files = (args.files as string[] | undefined) ?? []
+// ── Inbound ─────────────────────────────────────────────────────────────────
 
-        for (const f of files) {
-          assertSendable(f)
-          const st = statSync(f)
-          if (st.size > MAX_ATTACHMENT_BYTES) {
-            throw new Error(`file too large: ${f} (${(st.size / 1024 / 1024).toFixed(1)}MB, max 50MB)`)
-          }
-        }
-
-        const chunks = chunk(text, TEXT_CHUNK_LIMIT, 'length')
-        let sentCount = 0
-
-        try {
-          for (const chunkText of chunks) {
-            const sent = wsSend({
-              type: 'whatsapp_reply',
-              data: {
-                conversationId: conversation_id,
-                poolNumberId: pool_number_id,
-                toNumber: to_number,
-                text: chunkText,
-              },
-            })
-            if (!sent) throw new Error('WebSocket not connected')
-            sentCount++
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          throw new Error(
-            `reply failed after ${sentCount} of ${chunks.length} chunk(s) sent: ${msg}`,
-          )
-        }
-
-        // Send file attachments
-        for (const f of files) {
-          try {
-            const fileData = readFileSync(f)
-            const base64 = fileData.toString('base64')
-            const fileName = f.split('/').pop() || 'file'
-            const ext = fileName.split('.').pop()?.toLowerCase() || ''
-            const mimeMap: Record<string, string> = {
-              jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-              gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
-              mp4: 'video/mp4', mp3: 'audio/mpeg', ogg: 'audio/ogg',
-            }
-            const mimeType = mimeMap[ext] || 'application/octet-stream'
-
-            const sent = wsSend({
-              type: 'whatsapp_media_reply',
-              data: {
-                conversationId: conversation_id,
-                poolNumberId: pool_number_id,
-                toNumber: to_number,
-                media: {
-                  data: base64,
-                  mimeType,
-                  fileName,
-                },
-              },
-            })
-            if (!sent) throw new Error('WebSocket not connected')
-            sentCount++
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            throw new Error(`file attachment failed for ${f}: ${msg}`)
-          }
-        }
-
-        const result =
-          sentCount === 1
-            ? 'sent'
-            : `sent ${sentCount} parts`
-        return { content: [{ type: 'text', text: result }] }
-      }
-      case 'react': {
-        const sent = wsSend({
-          type: 'whatsapp_reaction',
-          data: {
-            conversationId: args.conversation_id as string,
-            poolNumberId: args.pool_number_id as string,
-            toNumber: args.to_number as string,
-            messageId: args.message_id as string,
-            emoji: args.emoji as string,
-          },
-        })
-        if (!sent) throw new Error('WebSocket not connected')
-        return { content: [{ type: 'text', text: 'reacted' }] }
-      }
-      default:
-        return {
-          content: [{ type: 'text', text: `unknown tool: ${req.params.name}` }],
-          isError: true,
-        }
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return {
-      content: [{ type: 'text', text: `${req.params.name} failed: ${msg}` }],
-      isError: true,
-    }
-  }
+const pipeline = createInboundPipeline({
+  mode: config.mode,
+  readTrust: () => readTrustList(TRUST_FILE, log),
+  download: m => downloadMedia(m, config.apiKey),
+  notify: (content, meta) => {
+    mcp
+      .notification({ method: 'notifications/claude/channel', params: { content, meta } })
+      .catch(err => log(`channel notification failed: ${err instanceof Error ? err.message : String(err)}`))
+  },
+  log,
 })
 
-// ── H. Inbound message handler ──────────────────────────────────────────────
+const router = createFrameRouter({ mode: config.mode, pipeline, transport, log })
 
-// PipesBot message types (inline — single consumer, no need for separate file)
-
-type PipesBotMedia = {
-  mediaId?: string
-  downloadUrl?: string
-  mimeType: string
-  fileName?: string
-  byteSize: number
-  unavailable?: boolean
-}
-
-type PipesBotLocation = {
-  latitude: number
-  longitude: number
-  name?: string
-  address?: string
-}
-
-type PipesBotContact = {
-  name: { formatted_name: string }
-  phones?: Array<{ phone: string; type?: string }>
-  emails?: Array<{ email: string; type?: string }>
-}
-
-type PipesBotReaction = {
-  messageId: string
-  emoji?: string
-}
-
-type PipesBotMessageData = {
-  messageId: string
-  conversationId: string
-  poolNumberId: string
-  poolNumberPhoneNumber: string
-  fromNumber: string
-  fromName?: string
-  text: string
-  body: string
-  timestamp: string
-  label?: string
-  type:
-    | 'text'
-    | 'image'
-    | 'audio'
-    | 'video'
-    | 'document'
-    | 'sticker'
-    | 'location'
-    | 'contacts'
-    | 'reaction'
-    | 'unsupported'
-  media?: PipesBotMedia
-  location?: PipesBotLocation
-  contacts?: PipesBotContact[]
-  reaction?: PipesBotReaction
-}
-
-type PipesBotMessage = {
-  type: 'whatsapp_message'
-  data: PipesBotMessageData
-}
-
-function isPipesBotMessage(msg: unknown): msg is PipesBotMessage {
-  return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    'type' in msg &&
-    (msg as { type: unknown }).type === 'whatsapp_message' &&
-    'data' in msg
-  )
-}
-
-type PipesBotReplyStatus = {
-  type: 'reply_status'
-  data: {
-    conversationId: string
-    success: boolean
-    messageId?: string
-    error?: string
-    code?: string
-  }
-}
-
-function isPipesBotReplyStatus(msg: unknown): msg is PipesBotReplyStatus {
-  return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    'type' in msg &&
-    (msg as { type: unknown }).type === 'reply_status' &&
-    'data' in msg
-  )
-}
-
-/** Resolve the text body for each message type. */
-function resolveRawBody(data: PipesBotMessageData): string {
-  switch (data.type) {
-    case 'text':
-      return data.body
-    case 'reaction':
-      return `[Reaction: ${data.reaction?.emoji ?? ''}]`
-    case 'location': {
-      const loc = data.location
-      if (!loc) return '(location)'
-      const parts = [`📍 Location: ${loc.latitude}, ${loc.longitude}`]
-      if (loc.name) parts.push(`Name: ${loc.name}`)
-      if (loc.address) parts.push(`Address: ${loc.address}`)
-      return parts.join('\n')
-    }
-    case 'contacts': {
-      if (!data.contacts || data.contacts.length === 0) return '(contacts)'
-      return data.contacts.map(c => {
-        const name = c.name?.formatted_name ?? 'Unknown'
-        const phones = (c.phones ?? []).map(p => p.phone).join(', ')
-        return phones ? `${name}: ${phones}` : name
-      }).join('\n')
-    }
-    default:
-      // image, audio, video, document, sticker — caption or empty
-      return data.body ?? ''
-  }
-}
-
-async function handleInboundMessage(data: PipesBotMessageData): Promise<void> {
-  log(`inbound [id=${data.messageId}] [type=${data.type}] from=${data.fromNumber}`)
-
-  // Skip unsupported types
-  if (data.type === 'unsupported') {
-    log(`skipping unsupported message type [id=${data.messageId}]`)
-    return
-  }
-
-  // Skip reaction removals
-  if (data.type === 'reaction' && !data.reaction?.emoji) {
-    log(`skipping reaction removal [id=${data.messageId}]`)
-    return
-  }
-
-  // Resolve body text
-  const body = resolveRawBody(data)
-
-  // Download media if applicable
-  let mediaPath: string | null = null
-  const mediaTypes = ['image', 'audio', 'video', 'document', 'sticker']
-  if (mediaTypes.includes(data.type) && data.media && !data.media.unavailable && data.media.downloadUrl) {
-    mediaPath = await downloadMedia(data.media.downloadUrl, data.media.mimeType, data.media.fileName)
-  }
-
-  // Determine meta field names based on media type
-  const mediaMetaKey = data.type === 'image' ? 'image_path'
-    : ['audio', 'video', 'document', 'sticker'].includes(data.type) ? 'file_path'
-    : null
-
-  // Send MCP notification
-  void mcp.notification({
-    method: 'notifications/claude/channel',
-    params: {
-      content: body,
-      meta: {
-        conversation_id: data.conversationId,
-        pool_number_id: data.poolNumberId,
-        message_id: data.messageId,
-        from_number: data.fromNumber,
-        user: data.fromName ?? data.fromNumber,
-        ts: new Date(data.timestamp).toISOString(),
-        ...(mediaPath && mediaMetaKey ? { [mediaMetaKey]: mediaPath } : {}),
-      },
-    },
-  })
-}
-
-// ── I. Reply status handler ─────────────────────────────────────────────────
-
-function handleReplyStatus(msg: PipesBotReplyStatus): void {
-  const { data } = msg
-  if (data.success) {
-    log(`reply delivered to ${data.conversationId} (messageId: ${data.messageId})`)
-  } else {
-    log(`reply failed for ${data.conversationId}: [${data.code ?? 'UNKNOWN'}] ${data.error ?? 'unknown error'}`)
-  }
-}
-
-// ── WebSocket message router ────────────────────────────────────────────────
-
-function handleWsMessage(msg: object): void {
-  if (isPipesBotMessage(msg)) {
-    void handleInboundMessage(msg.data)
-  } else if (isPipesBotReplyStatus(msg)) {
-    handleReplyStatus(msg)
-  }
-}
-
-// ── J. Startup ──────────────────────────────────────────────────────────────
+// ── Startup ─────────────────────────────────────────────────────────────────
 
 await mcp.connect(new StdioServerTransport())
-connectWs()
+conn = createConnection({
+  url: buildWsUrl(config),
+  mode: config.mode,
+  poolNumberId: config.poolNumberId,
+  onFrame: router,
+  onDisconnect: () => transport.onDisconnect(),
+  log,
+})
