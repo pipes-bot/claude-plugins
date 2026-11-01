@@ -34,6 +34,26 @@ export function closeAction(
   return { action: 'reconnect' }
 }
 
+/** Replace the value of any `apiKey=` parameter so the key never reaches a log. */
+export function redactKey(text: string): string {
+  return text.replace(/apiKey=[^&\s'"]*/g, 'apiKey=***')
+}
+
+// Bun's WebSocket does not emit `unexpected-response`, so a rejected upgrade (401/403
+// included) only surfaces as an `error` whose message carries no status code.
+export function isHandshakeRejection(message: string): boolean {
+  return message.includes('Expected 101 status code')
+}
+
+const HANDSHAKE_HINT_AT = 3
+
+/** The hint to log after `consecutiveRejections` rejected handshakes, or null. */
+export function handshakeHint(consecutiveRejections: number, poolNumberId?: string): string | null {
+  if (consecutiveRejections !== HANDSHAKE_HINT_AT) return null
+  const vars = poolNumberId ? 'PIPESBOT_API_KEY and PIPESBOT_POOL_NUMBER_ID' : 'PIPESBOT_API_KEY'
+  return `WebSocket handshake rejected ${HANDSHAKE_HINT_AT} times in a row — check ${vars} (still retrying with backoff)`
+}
+
 function computeBackoffDelay(attempt: number): number {
   return Math.floor(Math.random() * Math.min(MAX_MS, BASE_MS * Math.pow(2, attempt)))
 }
@@ -52,6 +72,7 @@ export function createConnection(opts: ConnectionOptions): { send: Send } {
   let ws: WebSocket | null = null
   let shouldReconnect = true
   let reconnectAttempts = 0
+  let handshakeRejections = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let pingTimer: ReturnType<typeof setInterval> | null = null
   let pongTimer: ReturnType<typeof setTimeout> | null = null
@@ -111,6 +132,7 @@ export function createConnection(opts: ConnectionOptions): { send: Send } {
 
     socket.on('open', () => {
       reconnectAttempts = 0
+      handshakeRejections = 0
       log(`WebSocket connected${opts.poolNumberId ? ` (pool: ${opts.poolNumberId})` : ' (all pools)'}`)
       startHeartbeat(socket)
     })
@@ -127,7 +149,12 @@ export function createConnection(opts: ConnectionOptions): { send: Send } {
     })
 
     socket.on('error', err => {
-      log(`WebSocket error: ${err.message}`)
+      log(redactKey(`WebSocket error: ${err.message}`))
+      if (isHandshakeRejection(err.message)) {
+        handshakeRejections += 1
+        const hint = handshakeHint(handshakeRejections, opts.poolNumberId)
+        if (hint) log(hint)
+      }
     })
 
     socket.on('close', code => {

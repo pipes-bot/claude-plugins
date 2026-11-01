@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { closeAction } from '../ws'
+import { closeAction, redactKey, handshakeHint, isHandshakeRejection } from '../ws'
 
 test('upgrade 401 stops with an authentication message', () => {
   expect(closeAction({ kind: 'upgrade', statusCode: 401 }, { mode: 'pool' })).toEqual({
@@ -39,4 +39,38 @@ test('close 4000 reconnects immediately', () => {
 
 test('close 1006 reconnects with backoff', () => {
   expect(closeAction({ kind: 'close', code: 1006 }, { mode: 'app-v2' }).action).toBe('reconnect')
+})
+
+test('redactKey hides the key in a URL with more params', () => {
+  expect(
+    redactKey("WebSocket connection to 'wss://api.pipes.bot/ws?apiKey=ak_abc123&poolNumberId=pn_1' failed"),
+  ).toBe("WebSocket connection to 'wss://api.pipes.bot/ws?apiKey=***&poolNumberId=pn_1' failed")
+})
+
+test('redactKey leaves text without apiKey= unchanged', () => {
+  expect(redactKey('WebSocket error: connection reset')).toBe('WebSocket error: connection reset')
+})
+
+test('redactKey hides a key at the end of the string', () => {
+  expect(redactKey('wss://api.pipes.bot/ws?apiKey=pk_secret')).toBe('wss://api.pipes.bot/ws?apiKey=***')
+})
+
+test('redactKey stops at whitespace and quotes', () => {
+  expect(redactKey('url apiKey=ak_1 next "apiKey=ak_2" done')).toBe('url apiKey=*** next "apiKey=***" done')
+})
+
+const HINT = 'WebSocket handshake rejected 3 times in a row — check PIPESBOT_API_KEY'
+
+test('handshakeHint fires only on the third consecutive rejection', () => {
+  expect(handshakeHint(1)).toBeNull()
+  expect(handshakeHint(2)).toBeNull()
+  expect(handshakeHint(3)).toBe(`${HINT} (still retrying with backoff)`)
+  expect(handshakeHint(3, 'pn_1')).toBe(`${HINT} and PIPESBOT_POOL_NUMBER_ID (still retrying with backoff)`)
+  expect(handshakeHint(4)).toBeNull()
+  expect(handshakeHint(4, 'pn_1')).toBeNull()
+})
+
+test('isHandshakeRejection matches Bun\'s non-101 error', () => {
+  expect(isHandshakeRejection("WebSocket connection to 'wss://x' failed: Expected 101 status code")).toBe(true)
+  expect(isHandshakeRejection('connect ECONNREFUSED')).toBe(false)
 })
