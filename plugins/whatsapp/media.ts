@@ -10,9 +10,33 @@ function log(msg: string): void {
 
 const MIME_BY_EXT: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-  gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
-  mp4: 'video/mp4', mp3: 'audio/mpeg', ogg: 'audio/ogg',
+  gif: 'image/gif', webp: 'image/webp',
+  mp4: 'video/mp4', '3gp': 'video/3gpp',
+  aac: 'audio/aac', amr: 'audio/amr', m4a: 'audio/mp4', mp3: 'audio/mpeg',
+  ogg: 'audio/ogg', opus: 'audio/ogg',
+  pdf: 'application/pdf',
+  txt: 'text/plain', md: 'text/plain', csv: 'text/plain', log: 'text/plain', json: 'text/plain',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
+
+// The MIME types Meta accepts for outbound media (image/webp goes out as a sticker).
+const WHATSAPP_MIMES = new Set([
+  'image/jpeg', 'image/png', 'image/webp',
+  'video/mp4', 'video/3gpp',
+  'audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4', 'audio/ogg',
+  'application/pdf', 'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+])
 
 const EXT_BY_MIME: Record<string, string> = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
@@ -23,6 +47,19 @@ const EXT_BY_MIME: Record<string, string> = {
 export function mimeFromPath(path: string): string {
   const ext = extname(path).slice(1).toLowerCase()
   return MIME_BY_EXT[ext] ?? 'application/octet-stream'
+}
+
+/** The MIME type to send `path` as on WhatsApp, or null when Meta would reject it. */
+export function whatsappMimeFor(path: string): string | null {
+  const mime = mimeFromPath(path)
+  return WHATSAPP_MIMES.has(mime) ? mime : null
+}
+
+export const UNSUPPORTED_FILE_HINT = 'send PDF, Office, text, JPEG/PNG, MP4/3GP or common audio'
+
+export function unsupportedFileType(path: string): string {
+  const ext = extname(path).toLowerCase()
+  return `unsupported file type for WhatsApp: ${ext || '(none)'} — ${UNSUPPORTED_FILE_HINT}`
 }
 
 export async function downloadMedia(

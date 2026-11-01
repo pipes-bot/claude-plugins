@@ -178,3 +178,34 @@ test('file mime from uppercase extension', async () => {
   await transport.sendFile(target, '/tmp/A.JPG')
   expect(JSON.parse(calls[0].init.body).mimeType).toBe('image/jpeg')
 })
+
+test('file mime: markdown is sent as text/plain', async () => {
+  const { transport, calls } = fileSetup({ ok: true, status: 200, json: { messageId: 'w' } })
+  await transport.sendFile(target, '/tmp/notes.md')
+  const body = JSON.parse(calls[0].init.body)
+  expect(body.mimeType).toBe('text/plain')
+  expect(body.fileName).toBe('notes.md')
+})
+
+test('file mime: docx', async () => {
+  const { transport, calls } = fileSetup({ ok: true, status: 200, json: { messageId: 'w' } })
+  await transport.sendFile(target, '/tmp/report.docx')
+  expect(JSON.parse(calls[0].init.body).mimeType).toBe(
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  )
+})
+
+test('unsupported file types fail before any network call', async () => {
+  const { transport, calls } = fileSetup({ ok: true, status: 200, json: { messageId: 'w' } })
+  const hint = 'send PDF, Office, text, JPEG/PNG, MP4/3GP or common audio'
+  await expect(transport.sendFile(target, '/tmp/anim.gif')).rejects.toThrow(
+    `unsupported file type for WhatsApp: .gif — ${hint}`,
+  )
+  await expect(transport.sendFile(target, '/tmp/bundle.ZIP')).rejects.toThrow(
+    `unsupported file type for WhatsApp: .zip — ${hint}`,
+  )
+  await expect(transport.sendFile(target, '/tmp/Makefile')).rejects.toThrow(
+    `unsupported file type for WhatsApp: (none) — ${hint}`,
+  )
+  expect(calls).toEqual([])
+})
