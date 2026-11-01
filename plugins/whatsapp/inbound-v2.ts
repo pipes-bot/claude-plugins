@@ -22,7 +22,8 @@ export type V2Envelope = {
   whatsapp: Record<string, any>
 }
 
-export type IdentityChange = { previousUserId: string; userId?: string; waId?: string }
+// previousPhone is the system message's `from`: the number the sender used before.
+export type IdentityChange = { previousUserId?: string; previousPhone?: string; userId?: string; waId?: string }
 
 export type V2Result = { messages: InboundMessage[]; notes: string[]; identityChanges: IdentityChange[] }
 
@@ -52,8 +53,13 @@ export function parseV2Event(env: V2Envelope): V2Result {
   for (const m of value.messages ?? []) {
     if (m.type === 'system') {
       const sys = m.system
-      if (sys && IDENTITY_CHANGE_TYPES.includes(sys.type) && sys.previous_user_id) {
-        result.identityChanges.push({ previousUserId: sys.previous_user_id, userId: sys.user_id, waId: sys.wa_id })
+      if (sys && IDENTITY_CHANGE_TYPES.includes(sys.type) && (sys.previous_user_id || m.from)) {
+        const change: IdentityChange = {}
+        if (sys.previous_user_id) change.previousUserId = sys.previous_user_id
+        if (m.from) change.previousPhone = m.from
+        if (sys.user_id) change.userId = sys.user_id
+        if (sys.wa_id) change.waId = sys.wa_id
+        result.identityChanges.push(change)
       }
       continue
     }
@@ -74,7 +80,7 @@ export function parseV2Event(env: V2Envelope): V2Result {
         name: contact?.profile?.name ?? contact?.profile?.username,
       },
       replyTo: m.from ?? m.from_user_id,
-      ts: new Date(Number(m.timestamp) * 1000).toISOString(),
+      ts: timestampOf(m.timestamp, env.createdAt),
       body: body.text,
     }
     if (body.media) message.media = body.media
@@ -82,6 +88,17 @@ export function parseV2Event(env: V2Envelope): V2Result {
   }
 
   return result
+}
+
+// Meta's `timestamp` is epoch seconds as a string. A bad one falls back to the
+// envelope's createdAt, then to now, so one odd message never sinks the batch.
+function timestampOf(raw: unknown, createdAt: unknown): string {
+  const seconds = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN
+  const fromMeta = new Date(seconds * 1000)
+  if (Number.isFinite(fromMeta.getTime())) return fromMeta.toISOString()
+  const fromEnvelope = typeof createdAt === 'string' ? new Date(createdAt) : new Date(NaN)
+  if (Number.isFinite(fromEnvelope.getTime())) return fromEnvelope.toISOString()
+  return new Date().toISOString()
 }
 
 type Resolved = { text: string; media?: InboundMedia }
