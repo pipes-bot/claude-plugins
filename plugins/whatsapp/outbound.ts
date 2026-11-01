@@ -9,6 +9,8 @@ export type Send = (frame: object) => boolean
 export type Log = (msg: string) => void
 
 export interface Transport {
+  /** False when sendFile always fails (pool numbers), so callers can refuse up front. */
+  readonly supportsFiles: boolean
   sendText(t: Target, text: string): Promise<SendOutcome>
   sendFile(t: Target, path: string): Promise<SendOutcome>
   react(t: Target, messageId: string, emoji: string): Promise<SendOutcome>
@@ -25,6 +27,8 @@ export function recipientField(to: string): { to: string } | { recipient: string
 export const POOL_UNSUPPORTED = 'not supported on pool numbers — the server ignores this frame'
 
 export class PoolTransport implements Transport {
+  readonly supportsFiles = false
+
   constructor(private send: Send, private log: Log) {}
 
   async sendText(t: Target, text: string): Promise<SendOutcome> {
@@ -80,6 +84,7 @@ type Pending = {
 }
 
 export class AppV2Transport implements Transport {
+  readonly supportsFiles = true
   private pending = new Map<string, Pending>()
   private fetchFn: typeof fetch
   private readFile: (p: string) => Uint8Array
