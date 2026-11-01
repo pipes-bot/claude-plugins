@@ -202,3 +202,46 @@ test('order is preserved', () => {
   )
   expect(r.messages.map(m => m.body)).toEqual(['first', 'second'])
 })
+
+test('a bad timestamp falls back to createdAt without losing the batch', () => {
+  const r = parseV2Event(
+    envelopeWith({
+      contacts,
+      messages: [
+        msg({ id: 'wamid.BAD', timestamp: 'not-a-number', type: 'text', text: { body: 'first' } }),
+        msg({ id: 'wamid.MISSING', timestamp: undefined, type: 'text', text: { body: 'second' } }),
+        msg({ id: 'wamid.GOOD', type: 'text', text: { body: 'third' } }),
+      ],
+    }),
+  )
+  expect(r.messages.map(m => m.messageId)).toEqual(['wamid.BAD', 'wamid.MISSING', 'wamid.GOOD'])
+  expect(r.messages[0]!.ts).toBe('2026-11-01T00:00:00.000Z')
+  expect(r.messages[1]!.ts).toBe('2026-11-01T00:00:00.000Z')
+  expect(r.messages[2]!.ts).toBe(new Date(1791490201000).toISOString())
+})
+
+test('a bad timestamp and a bad createdAt fall back to now', () => {
+  const env = { ...envelopeWith({ contacts, messages: [msg({ timestamp: 'x', type: 'text', text: { body: 'hi' } })] }), createdAt: 'nope' }
+  const before = Date.now()
+  const r = parseV2Event(env)
+  const ts = Date.parse(r.messages[0]!.ts)
+  expect(ts).toBeGreaterThanOrEqual(before - 1000)
+  expect(ts).toBeLessThanOrEqual(Date.now() + 1000)
+})
+
+test('identity change carries the previous phone', () => {
+  const r = parseV2Event(
+    envelopeWith({
+      messages: [
+        {
+          from: '5511987654321',
+          id: 'wamid.S',
+          timestamp: '1791490201',
+          type: 'system',
+          system: { type: 'user_changed_number', wa_id: '5511912345678' },
+        },
+      ],
+    }),
+  )
+  expect(r.identityChanges).toEqual([{ previousPhone: '5511987654321', waId: '5511912345678' }])
+})

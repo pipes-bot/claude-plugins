@@ -1,5 +1,5 @@
 import { EMPTY_TRUST_WARNING, type Mode } from './config'
-import { describeSender, isTrusted, normalizeId } from './trust'
+import { describeSender, isTrusted } from './trust'
 import {
   frameType,
   parsePoolMessage,
@@ -88,11 +88,21 @@ export function createInboundPipeline(deps: PipelineDeps): {
     // The list is never updated automatically; a trusted sender's new ID only gets a hint.
     identityChanges(changes) {
       const trust = deps.readTrust()
+      // isTrusted lets everyone through on an empty pool list; only a real entry counts here.
+      if (trust.size === 0) return
       for (const c of changes) {
-        const previous = normalizeId(c.previousUserId)
-        if (previous === null || !trust.has(previous)) continue
+        const previous =
+          c.previousUserId && isTrusted({ bsuid: c.previousUserId }, mode, trust)
+            ? c.previousUserId
+            : c.previousPhone && isTrusted({ phone: c.previousPhone }, mode, trust)
+              ? c.previousPhone
+              : undefined
+        if (previous === undefined) continue
+        const next = c.userId ?? c.waId
         log(
-          `trusted sender ${c.previousUserId} changed WhatsApp ID — run /whatsapp:configure trust ${c.userId ?? c.waId} to keep receiving their messages`,
+          next === undefined
+            ? `trusted sender ${previous} changed WhatsApp ID — check the next message's sender and run /whatsapp:configure trust <id>`
+            : `trusted sender ${previous} changed WhatsApp ID — run /whatsapp:configure trust ${next} to keep receiving their messages`,
         )
       }
     },

@@ -177,6 +177,30 @@ test('identity change falls back to waId', () => {
   expect(logs[0]).toContain('/whatsapp:configure trust 5511 ')
 })
 
+test('identity change of a phone-trusted sender names the new wa_id', () => {
+  const { pipeline, logs } = setup({ trust: ['5511987654321'] })
+  pipeline.identityChanges([{ previousPhone: '5511987654321', waId: '5511912345678' }])
+  expect(logs).toEqual([
+    'trusted sender 5511987654321 changed WhatsApp ID — run /whatsapp:configure trust 5511912345678 to keep receiving their messages',
+  ])
+})
+
+test('identity change without a new id never logs undefined', () => {
+  const { pipeline, logs } = setup({ trust: ['BR.1', '5511'] })
+  pipeline.identityChanges([{ previousUserId: 'BR.1' }, { previousPhone: '5511' }])
+  expect(logs).toEqual([
+    "trusted sender BR.1 changed WhatsApp ID — check the next message's sender and run /whatsapp:configure trust <id>",
+    "trusted sender 5511 changed WhatsApp ID — check the next message's sender and run /whatsapp:configure trust <id>",
+  ])
+  expect(logs.some(l => l.includes('undefined'))).toBe(false)
+})
+
+test('identity change matches each identifier only as its own kind', () => {
+  const { pipeline, logs } = setup({ trust: ['BR.1', '5511'] })
+  pipeline.identityChanges([{ previousUserId: '5511', userId: 'BR.2' }, { previousPhone: 'BR.1', waId: '9' }])
+  expect(logs).toEqual([])
+})
+
 test('identity change of an untrusted sender logs nothing', () => {
   const { pipeline, logs } = setup({ trust: ['BR.1'] })
   pipeline.identityChanges([{ previousUserId: 'BR.9', userId: 'BR.2' }])

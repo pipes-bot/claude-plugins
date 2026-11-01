@@ -65,6 +65,7 @@ export class PoolTransport implements Transport {
 }
 
 export const SEND_TIMEOUT_MS = 15_000
+export const FILE_SEND_TIMEOUT_MS = 120_000
 
 export type AppV2Deps = {
   send: Send
@@ -110,17 +111,27 @@ export class AppV2Transport implements Transport {
     const mimeType = whatsappMimeFor(path)
     if (mimeType === null) throw new Error(unsupportedFileType(path))
     const bytes = this.readFile(path)
-    const res = await this.fetchFn(`${this.deps.apiBase}/v1/messages/app/send`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${this.deps.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        poolNumberId: t.poolNumberId,
-        to: t.to,
-        media: Buffer.from(bytes).toString('base64'),
-        mimeType,
-        fileName: basename(path),
-      }),
-    })
+    let res: Response
+    try {
+      res = await this.fetchFn(`${this.deps.apiBase}/v1/messages/app/send`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.deps.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          poolNumberId: t.poolNumberId,
+          to: t.to,
+          media: Buffer.from(bytes).toString('base64'),
+          mimeType,
+          fileName: basename(path),
+        }),
+        signal: AbortSignal.timeout(FILE_SEND_TIMEOUT_MS),
+      })
+    } catch (err) {
+      const name = (err as { name?: unknown } | null)?.name
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        throw new Error(`send failed: timed out after ${FILE_SEND_TIMEOUT_MS}ms`)
+      }
+      throw err
+    }
     if (!res.ok) throw new Error(`send failed: HTTP ${res.status} ${await res.text()}`)
     const body = (await res.json()) as { messageId?: string }
     return { messageId: body.messageId }

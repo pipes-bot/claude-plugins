@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { AppV2Transport } from '../outbound'
+import { AppV2Transport, FILE_SEND_TIMEOUT_MS } from '../outbound'
 
 const target = { poolNumberId: 'p1', to: '5511' }
 
@@ -212,4 +212,29 @@ test('unsupported file types fail before any network call', async () => {
     `unsupported file type for WhatsApp: (none) — ${hint}`,
   )
   expect(calls).toEqual([])
+})
+
+test('file send has a 120s timeout', async () => {
+  expect(FILE_SEND_TIMEOUT_MS).toBe(120_000)
+  const { transport, calls } = fileSetup({ ok: true, status: 200, json: { messageId: 'w' } })
+  await transport.sendFile(target, '/tmp/shot.png')
+  expect(calls[0].init.signal).toBeInstanceOf(AbortSignal)
+})
+
+test('file send timeout is surfaced', async () => {
+  for (const name of ['TimeoutError', 'AbortError']) {
+    const fetchFn = async () => {
+      throw Object.assign(new Error('The operation timed out.'), { name })
+    }
+    const { transport } = setup({ fetch: fetchFn, readFile: () => new Uint8Array([1]) })
+    await expect(transport.sendFile(target, '/tmp/shot.png')).rejects.toThrow('send failed: timed out after 120000ms')
+  }
+})
+
+test('other file send network errors pass through', async () => {
+  const fetchFn = async () => {
+    throw new Error('connection refused')
+  }
+  const { transport } = setup({ fetch: fetchFn, readFile: () => new Uint8Array([1]) })
+  await expect(transport.sendFile(target, '/tmp/shot.png')).rejects.toThrow('connection refused')
 })
