@@ -3,8 +3,8 @@
  * WhatsApp channel for Claude Code via PipesBot.
  *
  * Self-contained MCP server, wiring only. The PipesBot API key picks the mode:
- *   - pk_ (pool number): every sender reaches Claude; replies go out as
- *     `whatsapp_reply` frames.
+ *   - pk_ (pool number): every sender reaches Claude unless trusted.json has
+ *     entries; replies go out as `whatsapp_reply` frames.
  *   - ak_ (BYON App on API v2): only senders in ~/.claude/channels/whatsapp/trusted.json
  *     reach Claude; replies, reactions and files go out as v2 `send` frames / app/send.
  *
