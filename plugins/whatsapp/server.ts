@@ -64,7 +64,7 @@ const transport: Transport =
 // ── MCP server ──────────────────────────────────────────────────────────────
 
 const mcp = new Server(
-  { name: 'whatsapp', version: '1.0.0' },
+  { name: 'whatsapp', version: '0.1.0' },
   {
     capabilities: { tools: {}, experimental: { 'claude/channel': {} } },
     instructions: INSTRUCTIONS,
