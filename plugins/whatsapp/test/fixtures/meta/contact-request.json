@@ -1,0 +1,56 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WABA_1",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550001111",
+              "phone_number_id": "pn_meta_1"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Maria Silva"
+                },
+                "wa_id": "5511987654321",
+                "user_id": "BR.10293847561029384"
+              }
+            ],
+            "messages": [
+              {
+                "from": "5511987654321",
+                "from_user_id": "BR.10293847561029384",
+                "id": "wamid.LIVE_CONTACT_REQUEST",
+                "timestamp": "1791490296",
+                "type": "contacts",
+                "contacts": [
+                  {
+                    "name": {
+                      "first_name": "Maria",
+                      "last_name": "Silva",
+                      "formatted_name": "Maria Silva"
+                    },
+                    "phones": [
+                      {
+                        "phone": "+55 11 98765-4321",
+                        "wa_id": "5511987654321",
+                        "type": "CELL"
+                      }
+                    ],
+                    "vcard": "QkVHSU46VkNBUkQKVkVSU0lPTjozLjAKTjpTaWx2YTtNYXJpYTs7OwpGTjpNYXJpYSBTaWx2YQpURUw7dHlwZT1DRUxMO3R5cGU9Vk9JQ0U7d2FpZD01NTExOTg3NjU0MzIxOis1NSAxMSA5ODc2NS00MzIxCkVORDpWQ0FSRA==",
+                    "origin": "contact_request"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
