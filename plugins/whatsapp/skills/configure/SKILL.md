@@ -19,8 +19,9 @@ reads `.env` at boot and re-reads `trusted.json` on every inbound message.
 The API key prefix picks the mode:
 
 - `pk_` — **pool number** (PipesBot's shared number). Text only: file
-  attachments and reactions return an explicit error. Every sender reaches
-  Claude; `trusted.json` is not consulted.
+  attachments and reactions return an explicit error. `trusted.json` is
+  optional: empty means everyone the server delivers (your activated phone)
+  gets through; once it has entries, only those senders do.
 - `ak_` — **BYON App on PipesBot API v2** (your own WhatsApp number). Text,
   files and reactions. Only senders in `trusted.json` reach Claude; with an
   empty list, every message is dropped.
@@ -48,8 +49,9 @@ Read `.env` and `trusted.json` and give the user a complete picture:
    - If not set: *"not set — receiving all pool numbers"*
 
 4. **Trusted senders** — read `~/.claude/channels/whatsapp/trusted.json` and
-   show how many entries `senders` holds (missing file = 0). On a `pk_` key,
-   add *"(not used on pool numbers — everyone is allowed)"*. On an `ak_` key
+   show how many entries `senders` holds (missing file = 0). On a `pk_` key
+   with 0 entries, add *"(optional on pool numbers — empty means everyone is
+   allowed)"*; with entries, add *"(only these senders get through)"*. On an `ak_` key
    with 0 entries, add: *"BYON mode: no trusted senders — all messages will be
    dropped. Add one with /whatsapp:configure trust <number>."*
 
@@ -113,7 +115,9 @@ Delete the `PIPESBOT_POOL_NUMBER_ID=` line from `.env`.
    else, write back as pretty-printed JSON.
 4. Confirm with the normalized ID that was stored. The change applies
    immediately — no restart needed.
-5. If the key is `pk_`, mention that trust only matters on BYON (`ak_`) keys.
+5. If the key is `pk_` and the list was empty, warn that adding the first entry
+   restricts the pool number to trusted senders only: everyone else is now
+   dropped.
 
 Brazilian numbers: WhatsApp's own ID for a number may lack the 9th digit
 (`5511912345678` may arrive as `551112345678`). The server compares the
@@ -125,8 +129,8 @@ to pass to `trust`.
 
 Normalize the argument exactly as for `trust`, remove every entry of
 `senders` that normalizes to it, write back. If it was not in the list, say
-so. Applies immediately. If the list is now empty on a BYON key, warn that
-all messages will be dropped.
+so. Applies immediately. If the list is now empty, warn on a BYON key that all
+messages will be dropped; on a pool key, that everyone is allowed again.
 
 ### `trusted` — list trusted senders
 

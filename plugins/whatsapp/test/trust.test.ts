@@ -83,6 +83,12 @@ test('empty list: app-v2 rejects, pool accepts', () => {
   expect(isTrusted({ phone: '5511999998888' }, 'pool', new Set())).toBe(true)
 })
 
+test('non-empty list gates pool too', () => {
+  const list = new Set(['5511999998888'])
+  expect(isTrusted({ phone: '+55 11 99999-8888' }, 'pool', list)).toBe(true)
+  expect(isTrusted({ phone: '1' }, 'pool', list)).toBe(false)
+})
+
 test('a BSUID in the phone field, or digits in the bsuid field, never match across kinds', () => {
   const list = new Set(['5511', 'US.1'])
   expect(isTrusted({ phone: 'US.1' }, 'app-v2', list)).toBe(false)

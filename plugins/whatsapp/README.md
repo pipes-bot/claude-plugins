@@ -8,7 +8,7 @@ The PipesBot API key picks the mode:
 
 | Key | Mode | What you get |
 |---|---|---|
-| `pk_…` | Pool number — PipesBot's shared number | Text only. File attachments and reactions return an error. Every sender reaches Claude. |
+| `pk_…` | Pool number — PipesBot's shared number | Text only. File attachments and reactions return an error. Everyone reaches Claude unless you add [trusted senders](#trusted-senders). |
 | `ak_…` | BYON App on PipesBot API v2 — your own WhatsApp number | Text, files and reactions. Only [trusted senders](#trusted-senders) reach Claude. |
 
 ### 1. Get a PipesBot API Key
@@ -50,8 +50,10 @@ every inbound message is dropped.
 
 ## Trusted senders
 
-On BYON, a WhatsApp number can be messaged by anyone, so only senders listed in
-`~/.claude/channels/whatsapp/trusted.json` reach Claude:
+A WhatsApp number can be messaged by anyone, so BYON only lets senders listed in
+`~/.claude/channels/whatsapp/trusted.json` reach Claude. On pool numbers the list
+is optional: empty means everyone the server delivers (your activated phone) gets
+through, and once you add entries only those senders do, same as BYON.
 
 ```json
 { "senders": ["5511912345678", "BR.1234567890"] }
@@ -62,10 +64,9 @@ On BYON, a WhatsApp number can be messaged by anyone, so only senders listed in
   `5511912345678` are the same entry.
 - The file is re-read on every message: `/whatsapp:configure trust`,
   `untrust` and `trusted` (or editing the file by hand) apply immediately.
-- A missing or malformed file counts as an empty list, and an empty list on BYON
-  drops everything. Messages from untrusted senders are dropped before any media
+- A missing or malformed file counts as an empty list. An empty list drops
+  everything on BYON and allows everyone on a pool number. Messages from untrusted senders are dropped before any media
   is downloaded, and only the sender's ID is logged, never the content.
-- On pool numbers the list is not consulted; every sender is allowed.
 - If a sender you trust changes their WhatsApp ID, the log suggests the
   `trust` command to add the new one. The list is never updated automatically.
 
@@ -162,7 +163,7 @@ Keys are redacted in these log lines.
 
 ### Messages from a trusted sender are dropped
 
-On BYON the log line `dropped untrusted sender <id>` shows the ID the server saw.
+The log line `dropped untrusted sender <id>` shows the ID the server saw.
 Run `/whatsapp:configure trust <id>` with exactly that value (see
 [Trusted senders](#trusted-senders)). If the list is empty the log also says
 `BYON mode: no trusted senders — all messages will be dropped`.
