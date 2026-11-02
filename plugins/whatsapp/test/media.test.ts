@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test'
 import { mkdtempSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { downloadMedia, mimeFromPath, whatsappMimeFor } from '../media'
+import { attachmentLimitFor, downloadMedia, mimeFromPath, whatsappMimeFor } from '../media'
 import type { InboundMedia } from '../inbound'
 
 const media: InboundMedia = { downloadUrl: '/media/1', mimeType: 'application/pdf', fileName: 'a.pdf', kind: 'file' }
@@ -79,5 +79,21 @@ test('whatsappMimeFor: types Meta accepts', () => {
 test('whatsappMimeFor: anything else is null', () => {
   for (const p of ['/a/x.gif', '/a/x.zip', '/a/x.unknownext', '/a/noext', '/a/.env']) {
     expect(whatsappMimeFor(p)).toBeNull()
+  }
+})
+
+test('attachmentLimitFor: per-type caps PipesBot enforces, documents capped at 50 MB', () => {
+  const MiB = 1024 * 1024
+  expect(attachmentLimitFor('image/jpeg')).toEqual({ kind: 'image', maxBytes: 5 * MiB })
+  expect(attachmentLimitFor('image/png')).toEqual({ kind: 'image', maxBytes: 5 * MiB })
+  expect(attachmentLimitFor('image/webp')).toEqual({ kind: 'sticker', maxBytes: 500 * 1024 })
+  for (const mime of ['audio/aac', 'audio/amr', 'audio/mp4', 'audio/mpeg', 'audio/ogg']) {
+    expect(attachmentLimitFor(mime)).toEqual({ kind: 'audio', maxBytes: 16 * MiB })
+  }
+  for (const mime of ['video/mp4', 'video/3gpp']) {
+    expect(attachmentLimitFor(mime)).toEqual({ kind: 'video', maxBytes: 16 * MiB })
+  }
+  for (const mime of ['application/pdf', 'text/plain', 'application/msword']) {
+    expect(attachmentLimitFor(mime)).toEqual({ kind: 'document', maxBytes: 50 * MiB })
   }
 })

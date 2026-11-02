@@ -53,7 +53,7 @@ A real-time WhatsApp channel powered by an MCP server that connects to PipesBot 
 
 | Tool | Description |
 |------|-------------|
-| `reply` | Send a text reply; file attachments (max 50 MB each) are BYON only |
+| `reply` | Send a text reply; file attachments are BYON only (images 5 MB, stickers 500 KB, audio and video 16 MB, documents 50 MB) |
 | `react` | Add an emoji reaction to a message (BYON only) |
 
 #### Skills

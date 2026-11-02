@@ -55,6 +55,31 @@ export function whatsappMimeFor(path: string): string | null {
   return WHATSAPP_MIMES.has(mime) ? mime : null
 }
 
+const MiB = 1024 * 1024
+
+export type AttachmentKind = 'image' | 'sticker' | 'audio' | 'video' | 'document'
+
+// Mirrors the PipesBot server's WHATSAPP_MEDIA_LIMITS so oversized files are refused before any part of a reply goes out.
+// Documents keep this plugin's own 50 MB cap (the server allows 100 MB).
+const LIMITS: Record<AttachmentKind, number> = {
+  image: 5 * MiB,
+  sticker: 500 * 1024,
+  audio: 16 * MiB,
+  video: 16 * MiB,
+  document: 50 * MiB,
+}
+
+/** The WhatsApp media kind `mime` goes out as, and the largest file PipesBot accepts for it. */
+export function attachmentLimitFor(mime: string): { kind: AttachmentKind; maxBytes: number } {
+  const kind: AttachmentKind =
+    mime === 'image/webp' ? 'sticker'
+      : mime.startsWith('image/') ? 'image'
+        : mime.startsWith('audio/') ? 'audio'
+          : mime.startsWith('video/') ? 'video'
+            : 'document'
+  return { kind, maxBytes: LIMITS[kind] }
+}
+
 export const UNSUPPORTED_FILE_HINT = 'send PDF, Office, text, JPEG/PNG, MP4/3GP or common audio'
 
 export function unsupportedFileType(path: string): string {

@@ -103,7 +103,7 @@ notifications, and exposes `reply` and `react` tools for Claude to respond.
 
 | Tool | Description |
 |---|---|
-| `reply` | Send a text reply. Optional file attachments (BYON only, max 50 MB each) |
+| `reply` | Send a text reply. Optional file attachments (BYON only): images up to 5 MB, stickers (.webp) 500 KB, audio and video 16 MB, documents 50 MB |
 | `react` | Add an emoji reaction to a message (BYON only) |
 
 On a pool number, a `reply` with `files` or a `react` call returns an error, and nothing

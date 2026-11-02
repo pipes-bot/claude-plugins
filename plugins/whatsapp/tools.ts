@@ -1,10 +1,21 @@
 import { realpathSync, statSync } from 'fs'
 import { join, sep } from 'path'
-import { unsupportedFileType, whatsappMimeFor } from './media'
+import { attachmentLimitFor, unsupportedFileType, whatsappMimeFor, type AttachmentKind } from './media'
 import type { Target, Transport } from './outbound'
 
 const TEXT_CHUNK_LIMIT = 4096
-const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
+
+const KIND_PLURAL: Record<AttachmentKind, string> = {
+  image: 'images', sticker: 'stickers', audio: 'audio', video: 'videos', document: 'documents',
+}
+
+const MiB = 1024 * 1024
+
+const formatLimit = (bytes: number): string => (bytes < MiB ? `${bytes / 1024}KB` : `${bytes / MiB}MB`)
+
+// Rounded up, so a file just over a limit never reads as equal to it.
+const formatSize = (bytes: number): string =>
+  bytes < MiB ? `${Math.ceil(bytes / 1024)}KB` : `${(Math.ceil((bytes / MiB) * 10) / 10).toFixed(1)}MB`
 
 export const INSTRUCTIONS = [
   'The sender reads WhatsApp on their phone, not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches their chat.',
@@ -43,7 +54,7 @@ export const TOOLS: Array<{ name: string; description: string; inputSchema: obje
         files: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Absolute file paths to attach. Max 50MB each. BYON (API v2) numbers only.',
+          description: 'Absolute file paths to attach. Size limits: images 5MB, stickers (.webp) 500KB, audio and video 16MB, documents 50MB. BYON (API v2) numbers only.',
         },
       },
       required: ['pool_number_id', 'to_number', 'text'],
@@ -116,10 +127,12 @@ async function reply(args: Record<string, unknown>, deps: ToolDeps): Promise<Too
   }
   for (const f of files) {
     assertSendable(f, deps.stateDir)
-    if (whatsappMimeFor(f) === null) throw new Error(unsupportedFileType(f))
+    const mime = whatsappMimeFor(f)
+    if (mime === null) throw new Error(unsupportedFileType(f))
+    const { kind, maxBytes } = attachmentLimitFor(mime)
     const size = statSize(f)
-    if (size > MAX_ATTACHMENT_BYTES) {
-      throw new Error(`file too large: ${f} (${(size / 1024 / 1024).toFixed(1)}MB, max 50MB)`)
+    if (size > maxBytes) {
+      throw new Error(`file too large: ${f} (${formatSize(size)}, max ${formatLimit(maxBytes)} for ${KIND_PLURAL[kind]})`)
     }
   }
 

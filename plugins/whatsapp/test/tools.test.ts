@@ -166,6 +166,59 @@ test('files are checked before sending: size', async () => {
   expect(calls).toEqual([])
 })
 
+const MiB = 1024 * 1024
+
+test('files are checked before sending: per-type size limit, nothing sent', async () => {
+  const cases: Array<[string, number, string]> = [
+    ['/tmp/a.png', 5 * MiB + 1, '(5.1MB, max 5MB for images)'],
+    ['/tmp/a.webp', 500 * 1024 + 1, '(501KB, max 500KB for stickers)'],
+    ['/tmp/a.mp3', 16 * MiB + 1, 'max 16MB for audio'],
+    ['/tmp/a.mp4', 16 * MiB + 1, 'max 16MB for videos'],
+    ['/tmp/a.pdf', 50 * MiB + 1, 'max 50MB for documents'],
+  ]
+  for (const [file, size, max] of cases) {
+    const { transport, calls } = fakeTransport()
+    const r = await callTool(
+      'reply',
+      { ...replyArgs, text: 'Here is the file', files: [file] },
+      deps(transport, () => size),
+    )
+    expect(r.isError).toBe(true)
+    expect(r.content[0]!.text).toContain(`file too large: ${file}`)
+    expect(r.content[0]!.text).toContain(max)
+    expect(calls).toEqual([])
+  }
+})
+
+test('an oversized later file blocks the whole reply', async () => {
+  const { transport, calls } = fakeTransport()
+  const sizes: Record<string, number> = { '/tmp/ok.pdf': 10, '/tmp/big.png': 6 * MiB }
+  const r = await callTool(
+    'reply',
+    { ...replyArgs, files: ['/tmp/ok.pdf', '/tmp/big.png'] },
+    deps(transport, p => sizes[p]!),
+  )
+  expect(r.isError).toBe(true)
+  expect(r.content[0]!.text).toBe('reply failed: file too large: /tmp/big.png (6.0MB, max 5MB for images)')
+  expect(calls).toEqual([])
+})
+
+test('files exactly at the per-type limit are sent', async () => {
+  const cases: Array<[string, number]> = [
+    ['/tmp/a.jpg', 5 * MiB],
+    ['/tmp/a.webp', 500 * 1024],
+    ['/tmp/a.ogg', 16 * MiB],
+    ['/tmp/a.3gp', 16 * MiB],
+    ['/tmp/a.docx', 50 * MiB],
+  ]
+  for (const [file, size] of cases) {
+    const { transport, calls } = fakeTransport()
+    const r = await callTool('reply', { ...replyArgs, files: [file] }, deps(transport, () => size))
+    expect(r.isError).toBeUndefined()
+    expect(calls.map(c => c.method)).toEqual(['sendText', 'sendFile'])
+  }
+})
+
 test('files are checked before sending: channel state', async () => {
   const { transport, calls } = fakeTransport()
   const envFile = join(stateDir, '.env')
