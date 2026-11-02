@@ -1,0 +1,14 @@
+{
+  "messaging_product": "whatsapp",
+  "contacts": [
+    {
+      "input": "BR.10293847561029384",
+      "user_id": "BR.10293847561029384"
+    }
+  ],
+  "messages": [
+    {
+      "id": "wamid.LIVE_SENT_TO_BSUID"
+    }
+  ]
+}
