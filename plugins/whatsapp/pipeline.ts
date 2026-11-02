@@ -9,11 +9,9 @@ import {
   type PoolMessageData,
 } from './inbound'
 import { parseV2Event, type IdentityChange, type V2Envelope } from './inbound-v2'
-import type { Log, Transport } from './outbound'
+import type { Log, Notify, Transport } from './outbound'
 
 export const DEDUPE_CAP = 1000
-
-export type Notify = (content: string, meta: Record<string, string>) => void
 
 export type PipelineDeps = {
   mode: Mode

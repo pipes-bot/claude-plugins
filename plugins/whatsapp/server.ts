@@ -58,7 +58,7 @@ const send: Send = f => conn?.send(f) ?? false
 
 const transport: Transport =
   config.mode === 'pool'
-    ? new PoolTransport(send, log)
+    ? new PoolTransport(send, log, notify)
     : new AppV2Transport({ send, log, apiKey: config.apiKey, apiBase: API_BASE })
 
 // ── MCP server ──────────────────────────────────────────────────────────────
@@ -70,6 +70,13 @@ const mcp = new Server(
     instructions: INSTRUCTIONS,
   },
 )
+
+// Declared as a function so the transport above can use it; it only runs after `mcp` exists.
+function notify(content: string, meta: Record<string, string>): void {
+  mcp
+    .notification({ method: 'notifications/claude/channel', params: { content, meta } })
+    .catch(err => log(`channel notification failed: ${err instanceof Error ? err.message : String(err)}`))
+}
 
 // TOOLS types inputSchema as a plain object; the SDK's result type wants its JSON-schema shape.
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }) as any)
@@ -87,11 +94,7 @@ const pipeline = createInboundPipeline({
   mode: config.mode,
   readTrust: () => readTrustList(TRUST_FILE, log),
   download: m => downloadMedia(m, config.apiKey),
-  notify: (content, meta) => {
-    mcp
-      .notification({ method: 'notifications/claude/channel', params: { content, meta } })
-      .catch(err => log(`channel notification failed: ${err instanceof Error ? err.message : String(err)}`))
-  },
+  notify,
   log,
 })
 

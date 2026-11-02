@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { recipientField, PoolTransport, POOL_UNSUPPORTED } from '../outbound'
+import { recipientField, PoolTransport, POOL_UNSUPPORTED, DAILY_LIMIT_NOTICE } from '../outbound'
 
 function setup(connected = true) {
   const frames: object[] = []
@@ -77,4 +77,26 @@ test('pool logs successful reply_status', () => {
   const { transport, logs } = setup()
   transport.handleFrame({ type: 'reply_status', data: { conversationId: 'c1', success: true, messageId: 'm9' } })
   expect(logs).toEqual(['reply delivered to c1 (messageId: m9)'])
+})
+
+test('pool tells the session when the daily limit blocks a reply', () => {
+  const notices: { content: string; meta: Record<string, string> }[] = []
+  const transport = new PoolTransport(
+    () => true,
+    () => {},
+    (content, meta) => notices.push({ content, meta }),
+  )
+  transport.handleFrame({
+    type: 'reply_status',
+    data: { conversationId: 'c1', success: false, code: 'DAILY_LIMIT_REACHED', error: 'limit' },
+  })
+  expect(notices).toEqual([{ content: DAILY_LIMIT_NOTICE, meta: { conversation_id: 'c1', kind: 'delivery_error' } }])
+})
+
+test('pool does not notify the session for other reply failures', () => {
+  const notices: string[] = []
+  const transport = new PoolTransport(() => true, () => {}, content => notices.push(content))
+  transport.handleFrame({ type: 'reply_status', data: { conversationId: 'c1', success: false, code: 'X' } })
+  transport.handleFrame({ type: 'reply_status', data: { conversationId: 'c1', success: true } })
+  expect(notices).toEqual([])
 })

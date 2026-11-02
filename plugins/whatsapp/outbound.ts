@@ -7,6 +7,8 @@ export type Target = { poolNumberId: string; to: string; conversationId?: string
 export type SendOutcome = { messageId?: string }
 export type Send = (frame: object) => boolean
 export type Log = (msg: string) => void
+/** Sends a channel notification to the session (not a user message). */
+export type Notify = (content: string, meta: Record<string, string>) => void
 
 export interface Transport {
   /** False when sendFile always fails (pool numbers), so callers can refuse up front. */
@@ -26,10 +28,13 @@ export function recipientField(to: string): { to: string } | { recipient: string
 
 export const POOL_UNSUPPORTED = 'not supported on pool numbers — the server ignores this frame'
 
+export const DAILY_LIMIT_NOTICE =
+  'Unable to send reply: this sandbox number reached its daily limit (5 messages/day). It resets at 00:00 UTC. Do not retry until then. For more volume, connect your own number with BYON.'
+
 export class PoolTransport implements Transport {
   readonly supportsFiles = false
 
-  constructor(private send: Send, private log: Log) {}
+  constructor(private send: Send, private log: Log, private notify: Notify = () => {}) {}
 
   async sendText(t: Target, text: string): Promise<SendOutcome> {
     if (!t.conversationId) throw new Error('conversation_id is required for pool numbers')
@@ -57,6 +62,10 @@ export class PoolTransport implements Transport {
       this.log(`reply delivered to ${data.conversationId} (messageId: ${data.messageId})`)
     } else {
       this.log(`reply failed for ${data.conversationId}: [${data.code ?? 'UNKNOWN'}] ${data.error ?? 'unknown error'}`)
+      if (data.code === 'DAILY_LIMIT_REACHED') {
+        // Tell the session so the agent stops retrying instead of looping on a blocked send.
+        this.notify(DAILY_LIMIT_NOTICE, { conversation_id: data.conversationId, kind: 'delivery_error' })
+      }
     }
     return true
   }

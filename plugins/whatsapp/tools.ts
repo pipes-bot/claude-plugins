@@ -11,6 +11,8 @@ export const INSTRUCTIONS = [
   '',
   'Messages from WhatsApp arrive as <channel source="whatsapp" pool_number_id="..." message_id="..." from_number="..." user="..." ts="...">, with conversation_id="..." on pool numbers and sender_id="..." when the sender has a WhatsApp BSUID. If the tag has an image_path or file_path attribute, Read that file — it is media the sender attached. Reply with the reply tool — pass pool_number_id back, pass from_number as to_number unchanged (it may be a BSUID such as BR.123… instead of a phone number), and pass conversation_id back only when the tag has one. sender_id is informational; you never need to pass it.',
   '',
+  'Channel events with kind="delivery_error" are PipesBot delivery notices (for example a daily send limit), not messages from the user. Do not reply to them; adjust what you do next instead.',
+  '',
   'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Use react to add emoji reactions. File attachments and reactions work on BYON (API v2) numbers only.',
   '',
   'WhatsApp has no message history API — you only see messages as they arrive. If you need earlier context, ask the user to paste or summarize.',
